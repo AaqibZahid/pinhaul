@@ -1,0 +1,8 @@
+/target
+AGENTS.md
+**/AGENTS.md
+/downloads
+/.state
+/.browser-profile
+*.log
+.probe_*
