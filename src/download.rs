@@ -106,21 +106,54 @@ async fn fetch_direct(
     let part = part_path(dir, stem, extension);
     let mut offset = existing_part_size(&part);
     let mut restart = false;
+    let mut restarts = 0u32;
+    let mut attempt = 0u32;
     let response = loop {
+        attempt += 1;
         let mut request = client.get(url);
         if offset > 0 && !restart {
-            request = apply_user_agent(request).header("Range", format!("bytes={offset}-"));
-        } else {
-            request = apply_user_agent(request);
+            request = request.header("Range", format!("bytes={offset}-"));
         }
-        match send(request, url).await? {
-            Some(response) => break response,
-            None => {
-                // The server refused the range, so the partial bytes cannot be
-                // continued and the file has to start over.
-                offset = 0;
-                restart = true;
+        match apply_user_agent(request).send().await {
+            Err(source) => {
+                let message = source.to_string();
+                if attempt >= MAX_ATTEMPTS || !retryable(&message) {
+                    return Err(PinpullError::Download {
+                        url: url.to_owned(),
+                        message,
+                    });
+                }
+                tokio::time::sleep(backoff(attempt, None)).await;
             }
+            Ok(response) => match response.status().as_u16() {
+                // The server refuses the range, so the partial bytes cannot be
+                // continued: the file has to start over. That is not a failed
+                // attempt, and it happens at most once per download.
+                416 if !restart && restarts == 0 && offset > 0 => {
+                    offset = 0;
+                    restart = true;
+                    restarts += 1;
+                    attempt -= 1;
+                }
+                416 => {
+                    return Err(PinpullError::Download {
+                        url: url.to_owned(),
+                        message: "HTTP 416".to_owned(),
+                    });
+                }
+                200 | 206 => break response,
+                status => {
+                    let message = format!("HTTP {status}");
+                    let retry_after = retry_after_of(&response);
+                    if attempt >= MAX_ATTEMPTS || !retryable(&message) {
+                        return Err(PinpullError::Download {
+                            url: url.to_owned(),
+                            message,
+                        });
+                    }
+                    tokio::time::sleep(backoff(attempt, retry_after)).await;
+                }
+            },
         }
     };
 
@@ -321,27 +354,6 @@ fn url_extension(url: &str) -> Option<&str> {
     let name = path.rsplit('/').next()?;
     let (_, extension) = name.rsplit_once('.')?;
     Some(extension)
-}
-
-/// Sends a request and reports whether the answer can be used as-is. A `416`
-/// means the server refuses the requested range, so the caller retries from the
-/// start rather than appending incompatible bytes.
-async fn send(request: reqwest::RequestBuilder, url: &str) -> Result<Option<reqwest::Response>> {
-    let response = request
-        .send()
-        .await
-        .map_err(|source| PinpullError::Download {
-            url: url.to_owned(),
-            message: source.to_string(),
-        })?;
-    match response.status().as_u16() {
-        416 => Ok(None),
-        200 | 206 => Ok(Some(response)),
-        status => Err(PinpullError::Download {
-            url: url.to_owned(),
-            message: format!("HTTP {status}"),
-        }),
-    }
 }
 
 /// Whether a failure is worth another attempt: connection trouble, timeouts,

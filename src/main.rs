@@ -1,27 +1,16 @@
-mod auth;
-mod board;
-mod cli;
-mod download;
-mod error;
-mod hls;
-mod input;
-mod media;
-mod pinterest;
-mod state;
-
-use std::collections::BTreeMap;
+﻿use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use clap::Parser;
-
-use crate::board::{Eligibility, PinSource};
-use crate::cli::Args;
-use crate::download::{Downloader, Fetched, Outcome};
-use crate::error::{PinpullError, Result};
-use crate::input::BoardRef;
-use crate::media::{MediaItem, output_stems, select_media};
-use crate::pinterest::PinterestClient;
-use crate::state::{Checkpoint, Record, Store};
+use pinpull::board;
+use pinpull::board::{Eligibility, PinSource};
+use pinpull::cli::Args;
+use pinpull::download::{Downloader, Fetched, Outcome};
+use pinpull::error::{PinpullError, Result};
+use pinpull::input::BoardRef;
+use pinpull::media::{MediaItem, output_stems, select_media};
+use pinpull::pinterest::PinterestClient;
+use pinpull::state::{Checkpoint, Record, Store};
 
 /// Where the media for one board lands, and `.state` lives beside it.
 struct Layout {
@@ -34,7 +23,7 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let board_ref: BoardRef = args.board.parse()?;
 
-    let session = auth::authenticate(args.headless).await?;
+    let session = pinpull::auth::authenticate(args.headless).await?;
     if !session.is_authenticated() {
         return Err(PinpullError::NotAuthenticated {
             message: "the browser handed over no Pinterest session cookie".into(),

@@ -1,4 +1,4 @@
-//! Choosing what to write for a pin.
+﻿//! Choosing what to write for a pin.
 //!
 //! Pinterest reports a pin's media in a handful of shapes: a plain image pin, a
 //! classic video pin, a carousel, and tall story pins built from pages of
@@ -10,6 +10,7 @@
 use serde_json::Value;
 
 use crate::board::{json_string, json_u64};
+use crate::pinterest::absolutize;
 
 /// What the chosen candidate is, and therefore how its bytes have to be turned
 /// into a file.
@@ -56,10 +57,12 @@ struct Candidate {
 }
 
 impl Candidate {
-    fn image(label: &str, url: String, value: &Value) -> Self {
+    /// An image candidate. The URL is made absolute because a relay payload can
+    /// report one relative to Pinterest's own origin.
+    fn image(label: &str, url: &str, value: &Value) -> Self {
         Self {
             label: label.to_owned(),
-            url,
+            url: absolutize(url),
             kind: MediaKind::Image,
             width: json_u64(value.get("width")).unwrap_or(0),
             height: json_u64(value.get("height")).unwrap_or(0),
@@ -67,11 +70,12 @@ impl Candidate {
         }
     }
 
-    fn video(label: &str, url: String, value: &Value) -> Self {
+    /// A video candidate, classified from how Pinterest names the URL.
+    fn video(label: &str, url: &str, value: &Value) -> Self {
         Self {
             label: label.to_owned(),
-            url,
-            kind: classify(&url_of(value)),
+            url: absolutize(url),
+            kind: classify(url),
             width: json_u64(value.get("width")).unwrap_or(0),
             height: json_u64(value.get("height")).unwrap_or(0),
             duration_ms: json_u64(value.get("duration")).unwrap_or(0),
@@ -95,10 +99,6 @@ impl Candidate {
             other.duration_ms,
         )
     }
-}
-
-fn url_of(value: &Value) -> String {
-    json_string(value.get("url")).unwrap_or_default()
 }
 
 /// Decides how a URL has to be fetched from how Pinterest names it.
@@ -190,7 +190,7 @@ fn collect_video_urls(value: &Value, depth: u8, out: &mut Vec<Candidate>) {
     }
     let url = json_string(value.get("url")).filter(|url| !url.is_empty());
     match url {
-        Some(url) => out.push(Candidate::video(VIDEO_LABEL, url, value)),
+        Some(url) => out.push(Candidate::video(VIDEO_LABEL, &url, value)),
         None => {
             if let Some(map) = value.as_object() {
                 for nested in map.values() {
@@ -261,7 +261,7 @@ fn best_image(container: &Value, label: &str) -> Option<Candidate> {
         if let Some(variant) = variants.get(key)
             && let Some(url) = json_string(variant.get("url")).filter(|url| !url.is_empty())
         {
-            return Some(Candidate::image(label, url, variant));
+            return Some(Candidate::image(label, &url, variant));
         }
     }
     image_candidates(variants, label)
@@ -287,7 +287,7 @@ fn image_source(container: &Value) -> Option<&Value> {
 /// (`{"url": ..., "width": ...}`).
 fn image_candidates(variants: &Value, label: &str) -> Vec<Candidate> {
     if let Some(url) = json_string(variants.get("url")).filter(|url| !url.is_empty()) {
-        return vec![Candidate::image(label, url, variants)];
+        return vec![Candidate::image(label, &url, variants)];
     }
     variants
         .as_object()
@@ -296,7 +296,7 @@ fn image_candidates(variants: &Value, label: &str) -> Vec<Candidate> {
         .filter(|(_, value)| value.is_object())
         .filter_map(|(_, value)| {
             let url = json_string(value.get("url")).filter(|url| !url.is_empty())?;
-            Some(Candidate::image(label, url, value))
+            Some(Candidate::image(label, &url, value))
         })
         .collect()
 }

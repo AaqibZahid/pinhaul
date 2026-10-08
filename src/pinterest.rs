@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+﻿use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use serde_json::{Value, json};
@@ -19,12 +19,20 @@ pub struct PinterestClient {
 
 struct Inner {
     http: reqwest::Client,
+    base: String,
     csrf: Mutex<String>,
     cookies: Mutex<String>,
 }
 
 impl PinterestClient {
     pub fn new() -> Result<Self> {
+        Self::with_base(BASE)
+    }
+
+    /// A client pointed at `base` instead of Pinterest. Production passes
+    /// `BASE`; tests point this at a fixture server so the same request and
+    /// parsing code runs without touching the live site.
+    pub fn with_base(base: &str) -> Result<Self> {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
@@ -35,6 +43,7 @@ impl PinterestClient {
         Ok(Self {
             inner: Arc::new(Inner {
                 http,
+                base: base.trim_end_matches('/').to_owned(),
                 csrf: Mutex::new(csrf_token()),
                 cookies: Mutex::new(String::new()),
             }),
@@ -61,23 +70,28 @@ impl PinterestClient {
         self.inner.cookies.lock().unwrap().clone()
     }
 
+    fn base(&self) -> &str {
+        &self.inner.base
+    }
+
     pub async fn board(&self, username: &str, slug: &str) -> Result<Value> {
         let path = format!("/{username}/{slug}/");
         let options = json!({"slug": slug, "username": username, "field_set_key": "detailed"});
-        let referer = format!("{BASE}{path}");
+        let referer = format!("{}{path}", self.base());
         self.call_data("Board", &options, &path, &referer).await
     }
 
     pub async fn pin(&self, id: &str) -> Result<Value> {
         let path = format!("/pin/{id}/");
         let options = json!({"id": id, "field_set_key": "detailed"});
-        let referer = format!("{BASE}{path}");
+        let referer = format!("{}{path}", self.base());
         self.call_data("Pin", &options, &path, &referer).await
     }
 
     pub async fn board_sections(&self, board_id: &str) -> Result<Vec<Value>> {
         let options = json!({"board_id": board_id});
-        self.call_paged("BoardSections", &options, "", &format!("{BASE}/"))
+        let referer = format!("{}/", self.base());
+        self.call_paged("BoardSections", &options, "", &referer)
             .await
     }
 
@@ -88,13 +102,14 @@ impl PinterestClient {
             "prepend": false,
             "bookmarks": null
         });
-        self.call_paged("BoardFeed", &options, "", &format!("{BASE}/"))
-            .await
+        let referer = format!("{}/", self.base());
+        self.call_paged("BoardFeed", &options, "", &referer).await
     }
 
     pub async fn board_section_pins(&self, section_id: &str) -> Result<Vec<Value>> {
         let options = json!({"section_id": section_id});
-        self.call_paged("BoardSectionPins", &options, "", &format!("{BASE}/"))
+        let referer = format!("{}/", self.base());
+        self.call_paged("BoardSectionPins", &options, "", &referer)
             .await
     }
 
@@ -129,7 +144,7 @@ impl PinterestClient {
         source_url: &str,
         referer: &str,
     ) -> Result<String> {
-        let url = build_url(resource, options, source_url)?;
+        let url = build_url(self.base(), resource, options, source_url)?;
         let mut backoff = Duration::from_secs(1);
         let mut attempt = 0u32;
         loop {
@@ -321,12 +336,13 @@ fn api_message(body: &str) -> Option<String> {
     if s.is_empty() { None } else { Some(s) }
 }
 
-pub fn build_url(resource: &str, options: &Value, source_url: &str) -> Result<String> {
+pub fn build_url(base: &str, resource: &str, options: &Value, source_url: &str) -> Result<String> {
     let data = json!({ "options": options });
     let data = percent_encode(&data.to_string());
     let source = percent_encode(source_url);
+    let base = base.trim_end_matches('/');
     Ok(format!(
-        "{BASE}/resource/{resource}Resource/get/?data={data}&source_url={source}"
+        "{base}/resource/{resource}Resource/get/?data={data}&source_url={source}"
     ))
 }
 
@@ -456,7 +472,7 @@ mod tests {
     #[test]
     fn build_url_encodes_data_wrapper() {
         let options = json!({"slug": "b", "username": "u"});
-        let url = build_url("Board", &options, "/u/b/").unwrap();
+        let url = build_url(BASE, "Board", &options, "/u/b/").unwrap();
         assert!(url.starts_with("https://www.pinterest.com/resource/BoardResource/get/?data="));
         let data = url
             .split("data=")
@@ -473,7 +489,7 @@ mod tests {
 
     #[test]
     fn build_url_source_url_empty_is_valid() {
-        let url = build_url("BoardFeed", &json!({"board_id": "1"}), "").unwrap();
+        let url = build_url(BASE, "BoardFeed", &json!({"board_id": "1"}), "").unwrap();
         assert!(url.ends_with("&source_url="));
     }
 
