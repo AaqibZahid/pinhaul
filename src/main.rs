@@ -1,21 +1,33 @@
 mod auth;
 mod board;
 mod cli;
+mod download;
 mod error;
+mod hls;
 mod input;
 mod media;
 mod pinterest;
+mod state;
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use clap::Parser;
 
 use crate::board::{Eligibility, PinSource};
 use crate::cli::Args;
-use crate::error::PinpullError;
+use crate::download::{Downloader, Fetched, Outcome};
+use crate::error::{PinpullError, Result};
 use crate::input::BoardRef;
-use crate::media::{output_stems, select_media};
+use crate::media::{MediaItem, output_stems, select_media};
 use crate::pinterest::PinterestClient;
+use crate::state::{Checkpoint, Record, Store};
+
+/// Where the media for one board lands, and `.state` lives beside it.
+struct Layout {
+    media: std::path::PathBuf,
+    store: Store,
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -41,86 +53,163 @@ async fn main() -> anyhow::Result<()> {
         }
         .into());
     }
-    let result = board::enumerate(&client, &board_ref, usize::from(args.jobs)).await?;
 
-    let info = &result.board;
-    println!("pinpull {}", info.name);
-    println!("  id:      {}", info.id);
-    println!("  url:     {}", info.url);
-    match info.pin_count {
-        Some(count) => println!("  pins:    {count}"),
-        None => println!("  pins:    unknown"),
+    let layout = Layout {
+        media: media_dir(&args.out, &board_ref),
+        store: Store::new(&args.out.join(".state")),
+    };
+    std::fs::create_dir_all(&layout.media)?;
+
+    println!("\npinpull {}/{}", board_ref.username, board_ref.board_slug);
+    println!("  discovering pins...");
+    let enumerated = board::enumerate(&client, &board_ref, usize::from(args.jobs)).await?;
+    let discovered = enumerated.pins.len();
+    if !enumerated.board.name.is_empty() {
+        println!(
+            "  board: {}  ({})",
+            enumerated.board.name, enumerated.board.id
+        );
     }
-    match info.section_count {
-        Some(count) => println!("  sections: {count}"),
-        None => println!("  sections: unknown"),
+    // Pinterest's own count is the reference an independent count is checked
+    // against, and a shortfall is a discovery problem rather than a display one.
+    match enumerated.board.pin_count {
+        Some(count) if count != discovered as u64 => {
+            println!("  pinterest reports {count} pins; pinpull discovered {discovered}")
+        }
+        Some(count) => println!("  pinterest reports {count} pins"),
+        None => println!("  pinterest reported no pin count"),
     }
-    println!("  out:     {}", args.out.display());
-    println!("  jobs:    {}", args.jobs);
+    if enumerated.duplicate_encounters > 0 {
+        println!(
+            "  {} duplicate pin ids ignored",
+            enumerated.duplicate_encounters
+        );
+    }
+    println!("  discovered {discovered} pins\n");
 
-    println!("\n  discovered unique pins: {}", result.pins.len());
-    println!("  duplicate encounters:   {}", result.duplicate_encounters);
+    let mut checkpoint = layout.store.load()?;
+    if checkpoint.board != format!("{}/{}", board_ref.username, board_ref.board_slug) {
+        // A different board's records must not decide this board's work.
+        checkpoint = Checkpoint::new(&format!("{}/{}", board_ref.username, board_ref.board_slug));
+        checkpoint.board_url = enumerated.board.url.clone().into();
+    }
 
+    let downloader = Arc::new(Downloader::new()?);
     let mut by_source: BTreeMap<PinSource, u64> = BTreeMap::new();
-    let mut eligible = 0u64;
-    let mut ineligible = 0u64;
-    let mut unknown = 0u64;
-    let mut with_media = 0u64;
-    let mut files = 0u64;
-    let mut images = 0u64;
-    let mut files_video = 0u64;
-    let mut playlists = 0u64;
-    let mut stems: Vec<String> = Vec::new();
     let mut unknown_ids: Vec<&str> = Vec::new();
+    let mut tasks: Vec<(String, Vec<MediaItem>)> = Vec::new();
 
-    for pin in &result.pins {
+    for pin in &enumerated.pins {
         *by_source.entry(pin.source.clone()).or_insert(0) += 1;
         match pin.eligibility {
-            Eligibility::Eligible => eligible += 1,
-            Eligibility::Ineligible => ineligible += 1,
+            Eligibility::Eligible => {}
+            Eligibility::Ineligible => {
+                checkpoint.set(
+                    &pin.id,
+                    Record::skipped("Pinterest does not permit downloading this pin"),
+                );
+                continue;
+            }
             Eligibility::Unknown => {
-                unknown += 1;
+                // Unknown eligibility is counted and reported, never dropped.
                 unknown_ids.push(&pin.id);
+                checkpoint.set(
+                    &pin.id,
+                    Record::failed("download eligibility is absent from the pin record"),
+                );
+                continue;
             }
         }
-        if pin.eligibility == Eligibility::Ineligible {
+        if !checkpoint.needs_download(&pin.id) {
             continue;
         }
         let Some(data) = &pin.data else {
+            checkpoint.set(
+                &pin.id,
+                Record::failed("the pin detail record was unavailable"),
+            );
             continue;
         };
         let items = select_media(data);
         if items.is_empty() {
+            // A discovered pin must never disappear from the accounting.
+            checkpoint.set(
+                &pin.id,
+                Record::skipped("Pinterest offers no downloadable media for this pin"),
+            );
             continue;
         }
-        with_media += 1;
-        files += u64::try_from(items.len()).unwrap_or(u64::MAX);
-        for item in &items {
+        tasks.push((pin.id.clone(), items));
+    }
+    layout.store.save(&checkpoint)?;
+
+    let already_on_disk = enumerated
+        .pins
+        .iter()
+        .filter(|pin| checkpoint.is_downloaded(&pin.id))
+        .count();
+    println!(
+        "  {} pins to download ({} already downloaded in a previous run)",
+        tasks.len(),
+        already_on_disk
+    );
+
+    // What this run will write, so the output says what medium to expect.
+    let (mut images, mut video_files, mut playlists) = (0u64, 0u64, 0u64);
+    for (_, items) in &tasks {
+        for item in items {
             if item.kind.is_playlist() {
                 playlists += 1;
             } else if item.kind.is_video() {
-                files_video += 1;
+                video_files += 1;
             } else {
                 images += 1;
             }
         }
-        stems.extend(output_stems(&pin.id, &items));
     }
 
+    let jobs = usize::from(args.jobs).max(1);
+    let mut set = tokio::task::JoinSet::new();
+    let mut queue: std::collections::VecDeque<(String, Vec<MediaItem>)> =
+        tasks.into_iter().collect();
+    for _ in 0..jobs.min(queue.len()) {
+        let downloader = Arc::clone(&downloader);
+        let media = layout.media.clone();
+        let (pin_id, items) = queue.pop_front().expect("queue was not empty");
+        set.spawn(download_pin(downloader, pin_id, items, media));
+    }
+    while let Some(joined) = set.join_next().await {
+        match joined {
+            Ok((pin_id, outcome)) => match outcome {
+                Ok(fetched) => checkpoint.set(&pin_id, record_for(fetched)),
+                Err(err) => checkpoint.set(&pin_id, Record::failed(err.to_string())),
+            },
+            Err(err) => {
+                eprintln!("pinpull: a download task failed: {err}");
+            }
+        }
+        layout.store.save(&checkpoint)?;
+        if let Some((pin_id, items)) = queue.pop_front() {
+            let downloader = Arc::clone(&downloader);
+            let media = layout.media.clone();
+            set.spawn(download_pin(downloader, pin_id, items, media));
+        }
+    }
+    layout.store.save(&checkpoint)?;
+
+    let tally = checkpoint.tally();
     println!("\n  by source:");
     for (source, count) in &by_source {
         println!("    {source}: {count}");
     }
-    println!("\n  eligibility:");
-    println!("    eligible:   {eligible}");
-    println!("    ineligible: {ineligible}");
-    println!("    unknown:    {unknown}");
-    println!("  with media:     {with_media}");
-    println!(
-        "  files to write: {files} ({images} images, {files_video} videos, {playlists} playlists)"
-    );
-    stems.sort_unstable();
-    println!("  distinct stems: {}", stems.len());
+    println!("\n  discovered: {}", discovered);
+    println!("    downloaded: {}", tally.downloaded);
+    println!("    skipped:    {}", tally.skipped);
+    println!("    failed:     {}", tally.failed);
+    println!("    total:      {}", tally.total());
+    println!("  this run wrote: {images} images, {video_files} videos, {playlists} playlists");
+    println!("  media in:     {}", layout.media.display());
+    println!("  checkpoint:   {}", layout.store.path().display());
 
     if !unknown_ids.is_empty() {
         let total = unknown_ids.len();
@@ -132,5 +221,89 @@ async fn main() -> anyhow::Result<()> {
         println!();
     }
 
+    // The accounting invariant: every discovered pin is accounted for, and the
+    // checkpoint's own view of the run agrees with the board it was written for.
+    if tally.total() != discovered {
+        return Err(PinpullError::Pinterest {
+            resource: "accounting",
+            message: format!(
+                "discovered {discovered} pins but the checkpoint accounts for {}",
+                tally.total()
+            ),
+        }
+        .into());
+    }
+    if !checkpoint.is_balanced() {
+        return Err(PinpullError::Pinterest {
+            resource: "accounting",
+            message: "the checkpoint lost a pin between the run and its own tally".into(),
+        }
+        .into());
+    }
+    if tally.pending > 0 {
+        eprintln!(
+            "pinpull: {} pins never reached an outcome and were not counted",
+            tally.pending
+        );
+    }
     Ok(())
+}
+
+/// Downloads one pin's media and reports the files it produced.
+async fn download_pin(
+    downloader: Arc<Downloader>,
+    pin_id: String,
+    items: Vec<MediaItem>,
+    dir: std::path::PathBuf,
+) -> (String, Result<Fetched>) {
+    let stems = output_stems(&pin_id, &items);
+    let mut files = Vec::with_capacity(items.len());
+    let mut bytes = 0u64;
+    let mut segments = 0usize;
+    for (item, stem) in items.iter().zip(stems.iter()) {
+        match downloader.fetch(item, stem, &dir).await {
+            Ok(fetched) => match fetched {
+                Fetched::Written(outcome) => {
+                    bytes += outcome.bytes;
+                    segments += outcome.segments;
+                    files.extend(outcome.files);
+                }
+                Fetched::AlreadyPresent(path) => files.push(name_of(&path)),
+            },
+            Err(err) => return (pin_id, Err(err)),
+        }
+    }
+    (
+        pin_id,
+        Ok(Fetched::Written(Outcome {
+            path: std::path::PathBuf::new(),
+            bytes,
+            segments,
+            files,
+        })),
+    )
+}
+
+fn name_of(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+fn record_for(fetched: Fetched) -> Record {
+    match fetched {
+        Fetched::Written(outcome) => Record::downloaded(outcome.files),
+        Fetched::AlreadyPresent(path) => Record::downloaded(vec![name_of(&path)]),
+    }
+}
+
+/// Media lands in `<out>/[<board>/]`; a default output nests each board so
+/// several boards can be downloaded into the same directory.
+fn media_dir(out: &std::path::Path, board: &BoardRef) -> std::path::PathBuf {
+    let is_default = out == std::path::Path::new("downloads");
+    if is_default {
+        out.join(format!("{}/{}", board.username, board.board_slug))
+    } else {
+        out.to_path_buf()
+    }
 }

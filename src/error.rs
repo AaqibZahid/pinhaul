@@ -41,6 +41,12 @@ pub enum PinpullError {
     #[error("browser automation failed: {message}")]
     Browser { message: String },
 
+    #[error("could not read the HLS playlist: {message}")]
+    Hls { message: String },
+
+    #[error("download from {url} failed: {message}")]
+    Download { url: String, message: String },
+
     #[error("not signed in: {message}. Run `pinpull <board> --login` once, then retry.")]
     NotAuthenticated { message: String },
 
