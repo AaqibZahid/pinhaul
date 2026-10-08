@@ -54,16 +54,16 @@ fn eligible_board_fixture() -> Fixture {
         ]),
         "-end-",
     ));
-    // Pin detail records, then the media files themselves.
-    fixture.then(common::resource_response(serde_json::json!({
+    // Pin pages, then the media files themselves.
+    fixture.then(common::pin_page(serde_json::json!({
         "id": "111",
-        "is_eligible_for_image_download": true,
-        "images": {"orig": {"url": one, "width": 1989, "height": 3000}}
+        "isEligibleForImageDownload": true,
+        "images_orig": {"url": one, "width": 1989, "height": 3000}
     })));
-    fixture.then(common::resource_response(serde_json::json!({
+    fixture.then(common::pin_page(serde_json::json!({
         "id": "222",
-        "is_eligible_for_image_download": true,
-        "images": {"orig": {"url": two, "width": 100, "height": 100}}
+        "isEligibleForImageDownload": true,
+        "images_orig": {"url": two, "width": 100, "height": 100}
     })));
     fixture.then(Reply::body("PNG-BYTES-FOR-PIN-ONE"));
     fixture.then(Reply::body("JPG-BYTES-FOR-PIN-TWO"));
@@ -428,24 +428,25 @@ async fn the_accounting_invariant_holds_for_a_mixed_board() {
                 "is_eligible_for_image_download": false,
                 "images": {"orig": {"url": one.clone()}}
             },
-            {"id": "333", "is_eligible_for_image_download": true}
+            // A pin Pinterest permits but offers no media for.
+            {"id": "333", "type": "pin", "is_eligible_for_image_download": true}
         ]),
         "-end-",
     ));
-    // Pin detail records: the feed does not carry eligibility, so every pin is
-    // re-fetched in detail form before it is classified.
-    fixture.then(common::resource_response(serde_json::json!({
+    // Pin pages: the feed does not carry eligibility, so every pin is re-fetched
+    // in detail form before it is classified.
+    fixture.then(common::pin_page(serde_json::json!({
         "id": "111",
-        "is_eligible_for_image_download": true,
-        "images": {"orig": {"url": one.clone()}}
+        "isEligibleForImageDownload": true,
+        "images_orig": {"url": one.clone()}
     })));
-    fixture.then(common::resource_response(serde_json::json!({
+    fixture.then(common::pin_page(serde_json::json!({
         "id": "222",
-        "is_eligible_for_image_download": false,
-        "images": {"orig": {"url": one.clone()}}
+        "isEligibleForImageDownload": false,
+        "images_orig": {"url": one.clone()}
     })));
-    fixture.then(common::resource_response(serde_json::json!({
-        "id": "333", "is_eligible_for_image_download": true
+    fixture.then(common::pin_page(serde_json::json!({
+        "id": "333", "isEligibleForImageDownload": true
     })));
     // The one eligible pin's media.
     fixture.then(Reply::body("PNG-BYTES"));

@@ -1,4 +1,4 @@
-﻿use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use serde_json::{Value, json};
@@ -88,6 +88,34 @@ impl PinterestClient {
         self.call_data("Pin", &options, &path, &referer).await
     }
 
+    /// The pin's own record.
+    ///
+    /// The `PinResource` endpoint refuses anonymous and even many signed-in
+    /// sessions, so the pin is read from the record Pinterest embeds in its own
+    /// pin page instead. That record is the same one the site renders from, so
+    /// nothing is reconstructed or guessed.
+    pub async fn pin_detail(&self, id: &str) -> Result<Value> {
+        let html = self.pin_page(id).await?;
+        match relay_pin_data(&html) {
+            PinRecord::Found(data) => Ok(data),
+            PinRecord::Error(kind) => Err(PinpullError::Pinterest {
+                resource: "Pin",
+                message: format!("Pinterest answered this pin as {kind}"),
+            }),
+            PinRecord::Missing => Err(PinpullError::Pinterest {
+                resource: "Pin",
+                message: "the pin page carried no pin record".into(),
+            }),
+        }
+    }
+
+    /// The pin's own page, fetched with the session's retry policy.
+    pub async fn pin_page(&self, id: &str) -> Result<String> {
+        let url = format!("{}/pin/{id}/", self.base());
+        let referer = url.clone();
+        self.fetch_with_retries(&url, &referer, "Pin").await
+    }
+
     pub async fn board_sections(&self, board_id: &str) -> Result<Vec<Value>> {
         let options = json!({"board_id": board_id});
         let referer = format!("{}/", self.base());
@@ -137,27 +165,21 @@ impl PinterestClient {
             .header("Cookie", cookie)
     }
 
-    async fn call_raw(
+    /// Fetches a URL with the session's own retry policy. HTML pages and JSON
+    /// resources share it, so a throttled pin page backs off exactly like a
+    /// throttled resource call does.
+    async fn fetch_with_retries(
         &self,
-        resource: &'static str,
-        options: &Value,
-        source_url: &str,
+        url: &str,
         referer: &str,
+        resource: &'static str,
     ) -> Result<String> {
-        let url = build_url(self.base(), resource, options, source_url)?;
         let mut backoff = Duration::from_secs(1);
         let mut attempt = 0u32;
         loop {
             attempt += 1;
-            match self.try_once(&url, referer).await {
-                Outcome::Body(body) => {
-                    if success_check(&body) {
-                        return Ok(body);
-                    }
-                    let message =
-                        api_message(&body).unwrap_or_else(|| "unrecognized response body".into());
-                    return Err(PinpullError::Pinterest { resource, message });
-                }
+            match self.try_once(url, referer).await {
+                Outcome::Body(body) => return Ok(body),
                 Outcome::RateLimited(retry_after) => {
                     if attempt >= MAX_ATTEMPTS {
                         return Err(PinpullError::RateLimited { attempts: attempt });
@@ -197,6 +219,22 @@ impl PinterestClient {
             }
             backoff = (backoff * 2).min(Duration::from_secs(8));
         }
+    }
+
+    async fn call_raw(
+        &self,
+        resource: &'static str,
+        options: &Value,
+        source_url: &str,
+        referer: &str,
+    ) -> Result<String> {
+        let url = build_url(self.base(), resource, options, source_url)?;
+        let body = self.fetch_with_retries(&url, referer, resource).await?;
+        if success_check(&body) {
+            return Ok(body);
+        }
+        let message = api_message(&body).unwrap_or_else(|| "unrecognized response body".into());
+        Err(PinpullError::Pinterest { resource, message })
     }
 
     async fn try_once(&self, url: &str, referer: &str) -> Outcome {
@@ -383,6 +421,110 @@ pub fn absolutize(path: &str) -> String {
     }
 }
 
+/// The global Pinterest's pin pages register their fetched payloads behind.
+const RELAY_MARKER: &str = "window.__PWS_RELAY_REGISTER_COMPLETED_REQUEST__";
+
+/// Reads a pin's own record out of its pin page.
+///
+/// The `PinResource` endpoint refuses anonymous and many signed-in sessions, so
+/// the pin is read from the record Pinterest embeds in the page it already
+/// serves. That registration is `("<%encoded request>", <response>)`, with the
+/// pin at `data.v3GetPinQueryv2.data`.
+///
+/// The same global is also used to install a fetch shim on the page, so every
+/// occurrence is tried and the one that carries the pin wins.
+/// What a pin page's relay payload said about the pin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PinRecord {
+    /// The pin's own record.
+    Found(Value),
+    /// Pinterest answered with a typed error, such as `PinNotFound`.
+    Error(String),
+    /// The page carried no pin query at all.
+    Missing,
+}
+
+pub fn relay_pin_data(html: &str) -> PinRecord {
+    let mut search = 0usize;
+    while let Some(found) = html[search..].find(RELAY_MARKER) {
+        let marker = search + found + RELAY_MARKER.len();
+        if let Some(record) = parse_relay_invocation(html, marker) {
+            return record;
+        }
+        search = marker;
+    }
+    PinRecord::Missing
+}
+
+/// Parses one `("<%encoded request>", <response>)` and reads the pin out of it.
+fn parse_relay_invocation(html: &str, from: usize) -> Option<PinRecord> {
+    let open = html[from..].find('(')? + from;
+    // Skip the first argument, which is always a quoted string.
+    let after_request = skip_json_string(html, open + 1)?;
+    let comma = html[after_request..].find(',')? + after_request;
+    let json = extract_json_object(html, comma + 1)?;
+    let doc: Value = serde_json::from_str(json).ok()?;
+    let query = doc.pointer("/data/v3GetPinQueryv2")?;
+    if let Some(data) = query.get("data").filter(|data| !data.is_null()) {
+        return Some(PinRecord::Found(data.clone()));
+    }
+    // A missing `data` is a typed refusal rather than a parse failure, and it is
+    // worth naming: Pinterest answers PinNotFound for a pin its query cannot
+    // reach, which is an honest result rather than a bug to paper over.
+    query
+        .get("__isError")
+        .and_then(Value::as_str)
+        .map(|kind| PinRecord::Error(kind.to_owned()))
+}
+
+/// Returns the index just past the JSON string that starts at or after `from`.
+fn skip_json_string(text: &str, from: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut index = text[from..].find('"')? + from;
+    index += 1;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' => index += 2,
+            b'"' => return Some(index + 1),
+            _ => index += 1,
+        }
+    }
+    None
+}
+
+/// Returns the balanced JSON object that starts at or after `from`.
+fn extract_json_object(text: &str, from: usize) -> Option<&str> {
+    let bytes = text.as_bytes();
+    let start = text[from..].find('{')? + from;
+    let mut depth = 0u32;
+    let mut index = start;
+    let mut in_string = false;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_string {
+            match byte {
+                b'\\' => index += 1,
+                b'"' => in_string = false,
+                _ => {}
+            }
+        } else {
+            match byte {
+                b'"' => in_string = true,
+                b'{' | b'[' => depth += 1,
+                b'}' | b']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(&text[start..=index]);
+                    }
+                }
+                _ => {}
+            }
+        }
+        index += 1;
+    }
+    None
+}
+
 fn csrf_token() -> String {
     let mut state = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -497,6 +639,110 @@ mod tests {
     fn absolutize_prefixes_relative_paths() {
         assert_eq!(absolutize("/u/b/"), "https://www.pinterest.com/u/b/");
         assert_eq!(absolutize("https://x.test/a"), "https://x.test/a");
+    }
+
+    #[test]
+    fn relay_pin_data_skips_the_pages_own_shim() {
+        // A pin page installs a fetch shim under the same global before the
+        // payload is registered, so the shim must not be mistaken for it.
+        let shim = r#"window.__PWS_RELAY_REGISTER_COMPLETED_REQUEST__=function(t,n){var o=decodeURIComponent(t),r=e[o];if(!r||"pending"===r.status){var c=Date.now(),a=r||{startTime:c+1,resolve:function(){},reject:function(){},promise:Promise.resolve(n),status:"pending"};a.resolve(n)}}"#;
+        let pin = serde_json::json!({"id": "1136033074790855749"});
+        let html = format!(
+            r#"<script>{shim}</script><script>window.__PWS_RELAY_REGISTER_COMPLETED_REQUEST__("%7B%22queryID%22%3A%221%22%7D", {{"data":{{"v3GetPinQueryv2":{{"__typename":"PinResponse","data":{}}}}}}})</script>"#,
+            pin
+        );
+
+        assert_eq!(
+            found_id(&relay_pin_data(&html)),
+            Some("1136033074790855749".to_owned())
+        );
+    }
+
+    /// The pin id a record holds, for the tests that assert on it.
+    fn found_id(record: &PinRecord) -> Option<String> {
+        match record {
+            PinRecord::Found(data) => data.get("id").and_then(Value::as_str).map(str::to_owned),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn relay_pin_data_reads_the_pin_from_a_pin_page() {
+        // The shape Pinterest serves: an encoded request, then the response.
+        let html = format!(
+            r#"<script nonce="abc" type="text/javascript">window.__PWS_RELAY_REGISTER_COMPLETED_REQUEST__("%7B%22queryID%22%3A%221%22%7D", {{"data":{{"v3GetPinQueryv2":{{"__typename":"PinResponse","data":{}}}}}}}</script>"#,
+            serde_json::json!({
+                "id": "1136033074790855749",
+                "isEligibleForImageDownload": true,
+                "images": {"orig": {"url": "https://i.pinimg.com/originals/a.png"}}
+            })
+        );
+
+        assert_eq!(
+            found_id(&relay_pin_data(&html)),
+            Some("1136033074790855749".to_owned())
+        );
+        assert_eq!(
+            relay_pin_data(&html),
+            PinRecord::Found(serde_json::json!({
+                "id": "1136033074790855749",
+                "isEligibleForImageDownload": true,
+                "images": {"orig": {"url": "https://i.pinimg.com/originals/a.png"}}
+            }))
+        );
+    }
+
+    #[test]
+    fn relay_pin_data_needs_the_pin_query_in_the_payload() {
+        let html = r#"window.__PWS_RELAY_REGISTER_COMPLETED_REQUEST__("x", {"data":{"otherQuery":{"data":{"id":"1"}}}})"#;
+        assert_eq!(relay_pin_data(html), PinRecord::Missing);
+    }
+
+    #[test]
+    fn relay_pin_data_survives_escaped_quotes_and_braces() {
+        // A value containing quotes and braces must not fool the parser.
+        let pin = serde_json::json!({
+            "id": "1",
+            "description": "a \"quoted\" {brace} and a \\ backslash"
+        });
+        let html = format!(
+            "window.__PWS_RELAY_REGISTER_COMPLETED_REQUEST__(\"%7B%7D\", {{\"data\":{{\"v3GetPinQueryv2\":{{\"data\":{}}}}}}})",
+            pin
+        );
+
+        let record = relay_pin_data(&html);
+        match &record {
+            PinRecord::Found(data) => assert_eq!(
+                data["description"],
+                "a \"quoted\" {brace} and a \\ backslash"
+            ),
+            other => panic!("the pin record was expected, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn relay_pin_data_reports_a_typed_refusal() {
+        // Pinterest answers a pin its query cannot reach with a typed error
+        // rather than a record, and that is an honest result to report.
+        let html = r#"window.__PWS_RELAY_REGISTER_COMPLETED_REQUEST__("%7B%7D", {"data":{"v3GetPinQueryv2":{"__typename":"PinNotFound","__isError":"PinNotFound"}},"extensions":{"is_final":true}})"#;
+        assert_eq!(
+            relay_pin_data(html),
+            PinRecord::Error("PinNotFound".to_owned())
+        );
+    }
+
+    #[test]
+    fn relay_pin_data_is_absent_from_an_unrelated_page() {
+        assert_eq!(
+            relay_pin_data("<html>nothing here</html>"),
+            PinRecord::Missing
+        );
+        assert_eq!(relay_pin_data(""), PinRecord::Missing);
+        // The marker without a payload is not a pin.
+        assert_eq!(
+            relay_pin_data("window.__PWS_RELAY_REGISTER_COMPLETED_REQUEST__"),
+            PinRecord::Missing
+        );
     }
 
     #[test]

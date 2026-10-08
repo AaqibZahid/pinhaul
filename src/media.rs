@@ -1,4 +1,4 @@
-﻿//! Choosing what to write for a pin.
+//! Choosing what to write for a pin.
 //!
 //! Pinterest reports a pin's media in a handful of shapes: a plain image pin, a
 //! classic video pin, a carousel, and tall story pins built from pages of
@@ -256,30 +256,66 @@ const IMAGE_LABEL: &str = "image";
 /// The largest rendition a source offers, preferring the untouched original
 /// whenever Pinterest published one.
 fn best_image(container: &Value, label: &str) -> Option<Candidate> {
-    let variants = image_source(container)?;
-    for key in ["orig", "originals"] {
-        if let Some(variant) = variants.get(key)
-            && let Some(url) = json_string(variant.get("url")).filter(|url| !url.is_empty())
-        {
-            return Some(Candidate::image(label, &url, variant));
+    let variants = image_variants(container);
+    if variants.is_empty() {
+        return None;
+    }
+    // An untouched original wins wherever it shows up, page level or per block.
+    for variant in &variants {
+        for key in ["orig", "originals"] {
+            if let Some(original) = variant.get(key)
+                && let Some(url) = json_string(original.get("url")).filter(|url| !url.is_empty())
+            {
+                return Some(Candidate::image(label, &url, original));
+            }
         }
     }
-    image_candidates(variants, label)
+    // Otherwise the largest frame of any variant.
+    let mut candidates = Vec::new();
+    for variant in &variants {
+        candidates.extend(image_candidates(variant, label));
+    }
+    candidates
         .into_iter()
-        .max_by_key(|candidate| (candidate.pixels(), candidate.kind == MediaKind::VideoFile))
+        .max_by_key(|candidate| (candidate.pixels(), candidate.kind == MediaKind::Image))
 }
 
-/// Where a container keeps its image variants.
-fn image_source(container: &Value) -> Option<&Value> {
-    [
+/// Where a container keeps its image variants: page level, or one per block.
+///
+/// A story pin page reports its originals at page level, but a page that holds
+/// only one image puts it on the block itself, named for its own size. Both are
+/// collected and the larger frame wins.
+fn image_variants(container: &Value) -> Vec<&Value> {
+    let mut variants = Vec::new();
+    for key in [
         "images_originals",
         "imageAdjustedSpec_orig",
         "images_orig",
         "images",
-    ]
-    .iter()
-    .filter_map(|key| container.get(*key))
-    .find(|value| !value.is_null())
+    ] {
+        if let Some(value) = container.get(key).filter(|value| !value.is_null()) {
+            variants.push(value);
+        }
+    }
+    if let Some(blocks) = container.get("blocks").and_then(Value::as_array) {
+        for block in blocks {
+            let Some(fields) = block.as_object() else {
+                continue;
+            };
+            for (key, value) in fields {
+                if is_image_field(key) && value.get("url").is_some() {
+                    variants.push(value);
+                }
+            }
+        }
+    }
+    variants
+}
+
+/// Whether a field on a story pin block holds an image worth downloading.
+fn is_image_field(key: &str) -> bool {
+    (key.starts_with("images_") || key.starts_with("imageAdjustedSpec_"))
+        && !matches!(key, "images_60x60" | "images_136x136")
 }
 
 /// Every rendition inside a variant map, read either as the REST shape
@@ -609,6 +645,72 @@ mod tests {
             ]
         );
         assert_eq!(labels(&pin), vec!["1", "2", "3"]);
+    }
+
+    #[test]
+    fn a_story_pin_image_sits_on_the_block_itself() {
+        // A relay-shaped story pin page puts the image on each block, named for
+        // its own size, and nothing at page level.
+        let pin = json!({
+            "storyPinData": {
+                "pages": [{
+                    "__typename": "StoryPinPage",
+                    "blocks": [{
+                        "__typename": "StoryPinImageBlock",
+                        "blockStyle": {"height": 100, "width": 100, "xCoord": 0, "yCoord": 0},
+                        "blockType": 2,
+                        "images_750x": {
+                            "height": 600,
+                            "url": "https://i.pinimg.com/736x/e4/d5/3a/e4d53aec39ad5c7aa2cfa06cc41e4903.jpg",
+                            "width": 480
+                        }
+                    }],
+                    "layout": 0
+                }]
+            }
+        });
+        assert_eq!(
+            urls(&pin),
+            vec![
+                "https://i.pinimg.com/736x/e4/d5/3a/e4d53aec39ad5c7aa2cfa06cc41e4903.jpg"
+                    .to_owned()
+            ]
+        );
+        assert_eq!(kinds(&pin), vec![MediaKind::Image]);
+        assert_eq!(labels(&pin), vec!["1"]);
+    }
+
+    #[test]
+    fn a_story_page_over_several_blocks_keeps_the_largest() {
+        // A block can carry both a small fast-load image and a larger one.
+        let pin = json!({
+            "story_pin_data": {
+                "pages": [{
+                    "blocks": [
+                        {
+                            "images_750x": {"url": "https://x/small.jpg", "width": 480, "height": 600}
+                        },
+                        {
+                            "images_orig": {"url": "https://x/big.jpg", "width": 1500, "height": 2000}
+                        }
+                    ]
+                }]
+            }
+        });
+        // The original on one block beats the sized variant on the other.
+        assert_eq!(urls(&pin), vec!["https://x/big.jpg".to_owned()]);
+    }
+
+    #[test]
+    fn a_thumbnail_only_block_does_not_beat_anything() {
+        let pin = json!({
+            "story_pin_data": {
+                "pages": [{
+                    "blocks": [{"images_60x60": {"url": "https://x/tiny.jpg"}}]
+                }]
+            }
+        });
+        assert!(select_media(&pin).is_empty());
     }
 
     #[test]

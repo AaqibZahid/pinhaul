@@ -275,3 +275,13 @@ pub fn image_pin(id: &str, url: &str) -> serde_json::Value {
         }
     })
 }
+
+/// A pin page as Pinterest serves one: the pin's record registered behind the
+/// relay global, which is where pin detail actually comes from.
+pub fn pin_page(pin: serde_json::Value) -> Reply {
+    let html = format!(
+        r#"<script nonce="n" type="text/javascript">window.__PWS_RELAY_REGISTER_COMPLETED_REQUEST__("%7B%22queryID%22%3A%221%22%7D", {{"data":{{"v3GetPinQueryv2":{{"__typename":"PinResponse","data":{}}}}}}})</script>"#,
+        pin
+    );
+    Reply::body(html)
+}

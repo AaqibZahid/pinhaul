@@ -23,13 +23,10 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let board_ref: BoardRef = args.board.parse()?;
 
+    // A public board Pinterest opens to everyone is read with whatever session
+    // the stored profile has, signed in or not; a board that refuses is what
+    // makes a sign-in necessary.
     let session = pinpull::auth::authenticate(args.headless).await?;
-    if !session.is_authenticated() {
-        return Err(PinpullError::NotAuthenticated {
-            message: "the browser handed over no Pinterest session cookie".into(),
-        }
-        .into());
-    }
     if session.csrf_token().is_none() {
         eprintln!("pinpull: the session carries no csrftoken cookie; API calls may be rejected");
     }
@@ -38,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
     client.set_cookies(session.cookie_header());
     if !client.has_session_cookies() {
         return Err(PinpullError::NotAuthenticated {
-            message: "the session cookie did not reach the API client".into(),
+            message: "the browser never reached Pinterest".into(),
         }
         .into());
     }
@@ -51,7 +48,33 @@ async fn main() -> anyhow::Result<()> {
 
     println!("\npinpull {}/{}", board_ref.username, board_ref.board_slug);
     println!("  discovering pins...");
-    let enumerated = board::enumerate(&client, &board_ref, usize::from(args.jobs)).await?;
+    let enumerated = match board::enumerate(&client, &board_ref, usize::from(args.jobs)).await {
+        Ok(result) => result,
+        // Pinterest answers a board the session may not see with 403, and it is
+        // the same answer for a board that needs a sign-in. Whether the user is
+        // signed in is what tells the two apart, and the wording has to reflect
+        // which one it is rather than guessing at a bypass.
+        Err(PinpullError::HttpStatus { status: 403, .. }) if !session.is_authenticated() => {
+            return Err(PinpullError::NotAuthenticated {
+                message: format!(
+                    "Pinterest requires a signed-in session to read {}/{}",
+                    board_ref.username, board_ref.board_slug
+                ),
+            }
+            .into());
+        }
+        Err(PinpullError::HttpStatus { status: 403, .. }) => {
+            return Err(PinpullError::Pinterest {
+                resource: "Board",
+                message: format!(
+                    "the current Pinterest account cannot access {}/{}",
+                    board_ref.username, board_ref.board_slug
+                ),
+            }
+            .into());
+        }
+        Err(err) => return Err(err.into()),
+    };
     let discovered = enumerated.pins.len();
     if !enumerated.board.name.is_empty() {
         println!(
@@ -113,10 +136,13 @@ async fn main() -> anyhow::Result<()> {
             continue;
         }
         let Some(data) = &pin.data else {
-            checkpoint.set(
-                &pin.id,
-                Record::failed("the pin detail record was unavailable"),
-            );
+            // A pin whose detail could not be read still ends as a failure with
+            // the reason attached, so nothing discovered goes unaccounted for.
+            let reason = pin
+                .failure
+                .clone()
+                .unwrap_or_else(|| "the pin detail record was unavailable".into());
+            checkpoint.set(&pin.id, Record::failed(reason));
             continue;
         };
         let items = select_media(data);

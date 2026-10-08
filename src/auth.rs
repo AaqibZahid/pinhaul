@@ -21,9 +21,13 @@ use futures::StreamExt as _;
 
 use crate::error::{PinpullError, Result};
 
-/// Marks a signed-in Pinterest visit; Pinterest resets it on every request
-/// that still carries a valid session.
+/// Marks a visit that carried a session, which Pinterest sets for signed-out
+/// visitors as well, so it proves the browser reached the site but not that
+/// anyone is signed in.
 const SESSION_COOKIE: &str = "_pinterest_sess";
+/// Pinterest's auth state: `1` signed in, `0` an anonymous visitor. This is the
+/// cookie that actually distinguishes the two.
+const AUTH_COOKIE: &str = "_auth";
 /// Sent back to the API and has to match the cookie Pinterest issued.
 const CSRF_COOKIE: &str = "csrftoken";
 const LOGIN_URL: &str = "https://www.pinterest.com/login/";
@@ -54,7 +58,10 @@ impl Session {
     }
 
     pub fn is_authenticated(&self) -> bool {
+        // A session cookie alone is not enough: Pinterest sets one for signed-out
+        // visitors too. `_auth` has to be `1` for a real sign-in.
         cookie_value(&self.header, SESSION_COOKIE).is_some()
+            && cookie_value(&self.header, AUTH_COOKIE).as_deref() == Some("1")
     }
 }
 
@@ -115,10 +122,13 @@ fn browser_config(headless: bool) -> Result<BrowserConfig> {
 /// Reads the session out of the stored profile.
 async fn restore_session(browser: &Browser) -> Result<Vec<Cookie>> {
     open_page(browser, HOME_URL).await?;
-    match poll_for_session(browser, BROWSER_SETTLE_TIMEOUT).await? {
+    // A stored profile that never signed in still sets a session cookie, so the
+    // wait is for proof the browser loaded Pinterest at all; whether anyone is
+    // signed in is decided by the caller.
+    match poll_for_session(browser, BROWSER_SETTLE_TIMEOUT, has_session_cookie).await? {
         PollOutcome::Found(cookies) => Ok(cookies),
         PollOutcome::TimedOut => Err(PinpullError::NotAuthenticated {
-            message: "the stored browser profile has no signed-in Pinterest session".into(),
+            message: "the stored browser profile never reached Pinterest".into(),
         }),
         PollOutcome::Failed(err) => Err(err),
     }
@@ -127,7 +137,7 @@ async fn restore_session(browser: &Browser) -> Result<Vec<Cookie>> {
 /// Waits until the visitor has finished signing in.
 async fn wait_for_login(browser: &Browser) -> Result<Vec<Cookie>> {
     open_page(browser, LOGIN_URL).await?;
-    match poll_for_session(browser, LOGIN_TIMEOUT).await? {
+    match poll_for_session(browser, LOGIN_TIMEOUT, has_auth_cookie).await? {
         PollOutcome::Found(cookies) => Ok(cookies),
         PollOutcome::TimedOut => Err(PinpullError::NotAuthenticated {
             message: "nobody signed in before the 10 minute wait ran out".into(),
@@ -152,14 +162,21 @@ enum PollOutcome {
     Failed(PinpullError),
 }
 
-async fn poll_for_session(browser: &Browser, timeout: Duration) -> Result<PollOutcome> {
+/// What the polling loop waits for, and how to tell it has arrived.
+type Ready = fn(&[Cookie]) -> bool;
+
+async fn poll_for_session(
+    browser: &Browser,
+    timeout: Duration,
+    ready: Ready,
+) -> Result<PollOutcome> {
     let deadline = Instant::now() + timeout;
     let mut failure: Option<PinpullError> = None;
     loop {
         match browser.get_cookies().await {
             Ok(cookies) => {
                 failure = None;
-                if has_session_cookie(&cookies) {
+                if ready(&cookies) {
                     return Ok(PollOutcome::Found(cookies));
                 }
             }
@@ -186,6 +203,17 @@ async fn poll_for_session(browser: &Browser, timeout: Duration) -> Result<PollOu
 /// session marker has to be there, hold a value, and belong to Pinterest.
 fn is_session_cookie(name: &str, value: &str, domain: &str) -> bool {
     name == SESSION_COOKIE && !value.is_empty() && cookie_matches_pinterest(domain)
+}
+
+/// Whether one of the browser's cookies proves somebody is signed in.
+fn is_auth_cookie(name: &str, value: &str, domain: &str) -> bool {
+    name == AUTH_COOKIE && value == "1" && cookie_matches_pinterest(domain)
+}
+
+fn has_auth_cookie(cookies: &[Cookie]) -> bool {
+    cookies
+        .iter()
+        .any(|cookie| is_auth_cookie(&cookie.name, &cookie.value, &cookie.domain))
 }
 
 fn has_session_cookie(cookies: &[Cookie]) -> bool {
@@ -355,21 +383,50 @@ mod tests {
     }
 
     #[test]
+    fn auth_cookie_detection_needs_a_one_on_pinterest() {
+        // The login wait keys on _auth, which is only 1 for a real sign-in.
+        assert!(is_auth_cookie(AUTH_COOKIE, "1", ".pinterest.com"));
+        assert!(!is_auth_cookie(AUTH_COOKIE, "0", ".pinterest.com"));
+        assert!(!is_auth_cookie(AUTH_COOKIE, "", ".pinterest.com"));
+        assert!(!is_auth_cookie(AUTH_COOKIE, "1", "example.com"));
+        assert!(!is_auth_cookie("_routing_id", "1", ".pinterest.com"));
+        assert!(!is_auth_cookie(AUTH_COOKIE, "1", ""));
+    }
+
+    #[test]
     fn session_reports_csrf_and_login_state() {
-        let signed_in = Session::from_header("_pinterest_sess=s; csrftoken=c");
+        // A signed-in visitor: _auth is 1 and the session cookie is present.
+        let signed_in = Session::from_header("_pinterest_sess=s; csrftoken=c; _auth=1");
         assert!(signed_in.is_authenticated());
-        assert_eq!(signed_in.cookie_header(), "_pinterest_sess=s; csrftoken=c");
+        assert_eq!(
+            signed_in.cookie_header(),
+            "_pinterest_sess=s; csrftoken=c; _auth=1"
+        );
         assert_eq!(signed_in.csrf_token().as_deref(), Some("c"));
 
-        // A csrftoken alone is what an anonymous visitor carries.
-        let anonymous = Session::from_header("csrftoken=c");
+        // Pinterest sets a session cookie for signed-out visitors too, so
+        // _auth=0 must read as not signed in.
+        let anonymous = Session::from_header("_pinterest_sess=s; csrftoken=c; _auth=0");
         assert!(!anonymous.is_authenticated());
         assert_eq!(anonymous.csrf_token().as_deref(), Some("c"));
+
+        // A csrftoken alone is what an anonymous visitor carries.
+        let anon = Session::from_header("csrftoken=c");
+        assert!(!anon.is_authenticated());
+        assert_eq!(anon.csrf_token().as_deref(), Some("c"));
 
         let empty = Session::from_header("");
         assert!(!empty.is_authenticated());
         assert_eq!(empty.cookie_header(), "");
         assert_eq!(empty.csrf_token(), None);
+    }
+
+    #[test]
+    fn an_empty_auth_value_is_not_a_sign_in() {
+        assert!(!Session::from_header("_pinterest_sess=s; _auth=").is_authenticated());
+        assert!(!Session::from_header("_pinterest_sess=s; _auth=0").is_authenticated());
+        assert!(!Session::from_header("_auth=1").is_authenticated());
+        assert!(Session::from_header("_pinterest_sess=s; _auth=1").is_authenticated());
     }
 
     #[test]

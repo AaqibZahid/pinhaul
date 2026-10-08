@@ -46,6 +46,8 @@ pub struct DiscoveredPin {
     pub eligibility: Eligibility,
     pub data: Option<Value>,
     pub source: PinSource,
+    /// Why the pin could not be read, when it could not be read at all.
+    pub failure: Option<String>,
 }
 
 #[derive(Debug)]
@@ -93,12 +95,45 @@ pub fn pin_id_of(item: &Value) -> Option<String> {
         .or_else(|| json_string(item.get("id")))
 }
 
-pub fn eligibility_from(item: &Value) -> Eligibility {
-    match item.get("is_eligible_for_image_download") {
-        Some(Value::Bool(true)) => Eligibility::Eligible,
-        Some(Value::Bool(false)) => Eligibility::Ineligible,
-        _ => Eligibility::Unknown,
+/// Whether a feed item is a pin rather than a module the feed ends with.
+///
+/// Pinterest closes a board feed with modules such as "Related Interests",
+/// whose items carry a fresh random id on every request and hold no pin data.
+/// Counting one as a pin would invent a pin the board does not have, and make
+/// the discovered count drift on every run.
+pub fn is_pin(item: &Value) -> bool {
+    if let Some(node) = item.get("node_id").and_then(Value::as_str) {
+        // A pin is a node, and its node_id says which kind it is.
+        let decoded = STANDARD
+            .decode(node)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok());
+        return decoded.is_some_and(|decoded| decoded.starts_with("Pin:"));
     }
+    // Without a node_id a pin still names itself in `type` and carries pin data,
+    // and still has none of the fields a module has.
+    item.get("story_type").is_none()
+        && item.get("id").is_some_and(|id| !id.is_null())
+        && (item.get("type").and_then(Value::as_str) == Some("pin")
+            || ["images", "aggregated_pin_data", "pinner", "videos"]
+                .iter()
+                .any(|key| item.get(*key).is_some_and(|value| !value.is_null())))
+}
+
+pub fn eligibility_from(item: &Value) -> Eligibility {
+    // The REST resource reports snake_case, the record embedded in a pin page
+    // reports camelCase, and a pin must be classified the same either way.
+    for key in [
+        "is_eligible_for_image_download",
+        "isEligibleForImageDownload",
+    ] {
+        match item.get(key) {
+            Some(Value::Bool(true)) => return Eligibility::Eligible,
+            Some(Value::Bool(false)) => return Eligibility::Ineligible,
+            _ => {}
+        }
+    }
+    Eligibility::Unknown
 }
 
 fn board_info(data: Value, board: &BoardRef) -> Result<BoardInfo> {
@@ -135,6 +170,11 @@ fn push_item(
     seen: &mut HashSet<String>,
     duplicate_encounters: &mut u64,
 ) {
+    // A feed item that is not a pin is a module the board feed ends with, not a
+    // pin of the board.
+    if !is_pin(&item) {
+        return;
+    }
     let Some(id) = pin_id_of(&item) else {
         return;
     };
@@ -195,7 +235,7 @@ pub async fn enumerate(
         );
     }
 
-    type DetailBatch = Vec<(String, Value)>;
+    type DetailBatch = Vec<(String, std::result::Result<Value, String>)>;
     let mut set: tokio::task::JoinSet<Result<DetailBatch>> = tokio::task::JoinSet::new();
     for chunk in candidates.chunks(jobs.max(1)) {
         let ids: Vec<String> = chunk.iter().map(|candidate| candidate.id.clone()).collect();
@@ -203,13 +243,16 @@ pub async fn enumerate(
         set.spawn(async move {
             let mut batch: DetailBatch = DetailBatch::new();
             for id in ids {
-                let data = client.pin(&id).await?;
-                batch.push((id, data));
+                // One pin's detail failing must not stop the board: the reason is
+                // carried so the pin ends as a failure with something to say,
+                // rather than taking the whole run down with it.
+                let outcome = client.pin_detail(&id).await.map_err(|err| err.to_string());
+                batch.push((id, outcome));
             }
             Ok(batch)
         });
     }
-    let mut details: HashMap<String, Value> = HashMap::new();
+    let mut details: HashMap<String, std::result::Result<Value, String>> = HashMap::new();
     while let Some(joined) = set.join_next().await {
         let batch = joined??;
         details.extend(batch);
@@ -218,7 +261,7 @@ pub async fn enumerate(
     let pins = candidates
         .into_iter()
         .map(|candidate| match details.remove(&candidate.id) {
-            Some(data) => {
+            Some(Ok(data)) => {
                 let detail = eligibility_from(&data);
                 let eligibility = if detail == Eligibility::Unknown {
                     candidate.feed_eligibility
@@ -230,13 +273,22 @@ pub async fn enumerate(
                     eligibility,
                     data: Some(data),
                     source: candidate.source,
+                    failure: None,
                 }
             }
+            Some(Err(reason)) => DiscoveredPin {
+                id: candidate.id,
+                eligibility: candidate.feed_eligibility,
+                data: None,
+                source: candidate.source,
+                failure: Some(reason),
+            },
             None => DiscoveredPin {
                 id: candidate.id,
                 eligibility: candidate.feed_eligibility,
                 data: None,
                 source: candidate.source,
+                failure: Some("the pin detail was never fetched".into()),
             },
         })
         .collect();
@@ -253,6 +305,75 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn a_module_at_the_end_of_a_feed_is_not_a_pin() {
+        // Pinterest closes a board feed with "Related Interests", whose items
+        // hold a fresh random id and no pin data.
+        let module = json!({
+            "id": "GtSJzuRT",
+            "story_type": "related_interests_module",
+            "title": {"format": "Related Interests"},
+            "content_ids": [],
+            "type": "story"
+        });
+        assert!(!is_pin(&module));
+        assert_eq!(pin_id_of(&module).as_deref(), Some("GtSJzuRT"));
+
+        // ... and that module never reaches the candidate list.
+        let mut candidates = Vec::new();
+        let mut seen = HashSet::new();
+        let mut duplicates = 0u64;
+        push_item(
+            module,
+            PinSource::BoardFeed,
+            &mut candidates,
+            &mut seen,
+            &mut duplicates,
+        );
+        assert!(
+            candidates.is_empty(),
+            "a module must not be a discovered pin"
+        );
+    }
+
+    #[test]
+    fn a_real_pin_is_recognised() {
+        let pin = image_pin_fixture();
+        assert!(is_pin(&pin));
+        assert_eq!(pin_id_of(&pin).as_deref(), Some("1136033074790855749"));
+    }
+
+    #[test]
+    fn a_pin_without_a_node_id_is_still_a_pin() {
+        // A pin that names itself in `type` and carries pin data counts.
+        let pin = json!({
+            "id": "1136033074790855749",
+            "type": "pin",
+            "images": {"orig": {"url": "https://x/a.png"}}
+        });
+        assert!(is_pin(&pin));
+    }
+
+    #[test]
+    fn a_pin_missing_media_but_named_is_still_a_pin() {
+        // Eligibility is decided later; a pin with no media anywhere is still a
+        // pin, and is skipped as such rather than dropped from discovery.
+        let pin = json!({
+            "id": "1136033074790855749",
+            "node_id": "UGluOjExMzYwMzMwNzQ3OTA4NTU3NDk="
+        });
+        assert!(is_pin(&pin));
+    }
+
+    fn image_pin_fixture() -> serde_json::Value {
+        json!({
+            "node_id": "UGluOjExMzYwMzMwNzQ3OTA4NTU3NDk=",
+            "id": "1136033074790855749",
+            "type": "pin",
+            "images": {"orig": {"url": "https://i.pinimg.com/originals/a.png"}}
+        })
+    }
 
     #[test]
     fn pin_id_decodes_node_id() {
@@ -298,6 +419,33 @@ mod tests {
     }
 
     #[test]
+    fn eligibility_reads_the_camelcase_the_pin_page_reports() {
+        // The record embedded in a pin page spells it differently to the REST
+        // resource, and a pin must be classified the same either way.
+        assert_eq!(
+            eligibility_from(&json!({"isEligibleForImageDownload": true})),
+            Eligibility::Eligible
+        );
+        assert_eq!(
+            eligibility_from(&json!({"isEligibleForImageDownload": false})),
+            Eligibility::Ineligible
+        );
+        assert_eq!(
+            eligibility_from(&json!({"isEligibleForImageDownload": "true"})),
+            Eligibility::Unknown
+        );
+        assert_eq!(
+            eligibility_from(&json!({"isEligibleForImageDownload": null})),
+            Eligibility::Unknown
+        );
+        // An empty value is unknown, not eligible.
+        assert_eq!(
+            eligibility_from(&json!({"is_eligible_for_image_download": ""})),
+            Eligibility::Unknown
+        );
+    }
+
+    #[test]
     fn push_item_dedups_by_pin_id_and_skips_idless() {
         let mut candidates = Vec::new();
         let mut seen = HashSet::new();
@@ -309,8 +457,9 @@ mod tests {
             &mut seen,
             &mut dupes,
         );
+        // The same pin again, this time reached through a section.
         push_item(
-            json!({"id": "123"}),
+            json!({"node_id": "UGluOjEyMw=="}),
             PinSource::Section("Mardi Gras".into()),
             &mut candidates,
             &mut seen,

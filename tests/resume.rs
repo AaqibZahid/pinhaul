@@ -6,7 +6,7 @@
 
 mod common;
 
-use common::{Fixture, Reply, resource_page, resource_response, scratch};
+use common::{Fixture, Reply, pin_page, resource_page, resource_response, scratch};
 
 use pinpull::board::enumerate;
 use pinpull::input::BoardRef;
@@ -38,10 +38,10 @@ fn three_pin_board() -> Fixture {
         .collect();
     fixture.then(resource_page(serde_json::Value::Array(pins), "-end-"));
     for index in 1..=3 {
-        fixture.then(resource_response(serde_json::json!({
+        fixture.then(pin_page(serde_json::json!({
             "id": index.to_string(),
-            "is_eligible_for_image_download": true,
-            "images": {"orig": {"url": format!("{base}/originals/{index}.png")}}
+            "isEligibleForImageDownload": true,
+            "images_orig": {"url": format!("{base}/originals/{index}.png")}
         })));
     }
     for index in 1..=3 {

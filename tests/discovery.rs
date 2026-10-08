@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{Fixture, Reply, image_pin, resource_page, resource_response, scratch};
+use common::{Fixture, Reply, image_pin, pin_page, resource_page, resource_response, scratch};
 
 use pinpull::board::{Eligibility, enumerate};
 use pinpull::input::BoardRef;
@@ -153,6 +153,34 @@ async fn a_stop_prefix_bookmark_ends_pagination() {
 }
 
 #[tokio::test]
+async fn a_module_at_the_end_of_a_feed_is_not_a_pin() {
+    let board: BoardRef = "user/board".parse().unwrap();
+    let fixture = Fixture::start(resource_response(serde_json::json!({
+        "id": "1", "name": "b", "pin_count": 45, "section_count": 0
+    })));
+    // One real pin, then the "Related Interests" module Pinterest closes a board
+    // feed with, whose id is fresh on every request.
+    fixture.then(resource_page(
+        serde_json::json!([
+            image_pin("111", "https://i.pinimg.com/originals/1.png"),
+            {
+                "id": "GtSJzuRT",
+                "type": "story",
+                "story_type": "related_interests_module",
+                "title": {"format": "Related Interests"},
+                "content_ids": []
+            }
+        ]),
+        "-end-",
+    ));
+
+    let client = fixture_client(&fixture);
+    let result = enumerate(&client, &board, 4).await.unwrap();
+    assert_eq!(result.pins.len(), 1, "a module is not a pin of the board");
+    assert_eq!(result.pins[0].id, "111");
+}
+
+#[tokio::test]
 async fn a_private_board_refuses_with_an_explicit_error() {
     let board: BoardRef = "user/board".parse().unwrap();
     // Pinterest answers 403 for a board the session may not see.
@@ -197,26 +225,42 @@ async fn a_malformed_board_response_is_not_guessed_at() {
 }
 
 #[tokio::test]
-async fn a_403_on_pin_detail_leaves_the_pin_unaccounted_not_silently_dropped() {
-    let pin = image_pin("111", "https://i.pinimg.com/originals/1.png");
-    let _ = pin;
+async fn a_403_on_pin_detail_does_not_stop_the_board() {
     let board: BoardRef = "user/board".parse().unwrap();
-    // The board reads fine but every pin detail answers 403.
+    // The board reads fine, but one pin's detail refuses. The pin ends as a
+    // failure with the reason, and the rest of the board carries on.
     let fixture = Fixture::start(resource_response(serde_json::json!({
-        "id": "1", "name": "b", "pin_count": 1, "section_count": 0
+        "id": "1", "name": "b", "pin_count": 2, "section_count": 0
     })));
     fixture.then(resource_page(
-        serde_json::json!([image_pin("111", "https://i.pinimg.com/originals/1.png")]),
+        serde_json::json!([
+            image_pin("111", "https://i.pinimg.com/originals/1.png"),
+            image_pin("222", "https://i.pinimg.com/originals/2.png")
+        ]),
         "-end-",
     ));
     fixture.then(Reply::body("{}").status(403));
-    fixture.then(Reply::body("{}").status(403));
+    fixture.then(pin_page(serde_json::json!({
+        "id": "222",
+        "isEligibleForImageDownload": true,
+        "images_orig": {"url": "https://i.pinimg.com/originals/2.png"}
+    })));
 
     let client = fixture_client(&fixture);
-    let error = enumerate(&client, &board, 1).await.unwrap_err();
-    assert!(
-        error.to_string().contains("403"),
-        "a per-pin 403 must surface, not be dropped: {error}"
+    let result = enumerate(&client, &board, 1).await.unwrap();
+    assert_eq!(result.pins.len(), 2, "both pins are still discovered");
+    // Whichever pin got the refusal, it carries the reason and the other one's
+    // record came through.
+    let failures: Vec<&str> = result
+        .pins
+        .iter()
+        .filter_map(|pin| pin.failure.as_deref())
+        .collect();
+    assert_eq!(failures.len(), 1, "one pin's detail refused: {failures:?}");
+    assert!(failures[0].contains("403"), "the reason names the status");
+    assert_eq!(
+        result.pins.iter().filter(|pin| pin.data.is_some()).count(),
+        1
     );
 }
 
