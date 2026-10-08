@@ -9,6 +9,8 @@ pub const BASE: &str = "https://www.pinterest.com";
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const MAX_ATTEMPTS: u32 = 5;
 const STOP_PREFIX: &str = "Y2JOb25lO";
+const CSRF_COOKIE: &str = "csrftoken";
+const SESSION_COOKIE: &str = "_pinterest_sess";
 
 #[derive(Clone)]
 pub struct PinterestClient {
@@ -17,7 +19,7 @@ pub struct PinterestClient {
 
 struct Inner {
     http: reqwest::Client,
-    csrf: String,
+    csrf: Mutex<String>,
     cookies: Mutex<String>,
 }
 
@@ -33,10 +35,30 @@ impl PinterestClient {
         Ok(Self {
             inner: Arc::new(Inner {
                 http,
-                csrf: csrf_token(),
+                csrf: Mutex::new(csrf_token()),
                 cookies: Mutex::new(String::new()),
             }),
         })
+    }
+
+    /// Installs a signed-in Pinterest session as a `Cookie` header value and
+    /// aligns the CSRF token with the `csrftoken` cookie inside it.
+    pub fn set_cookies(&self, cookie_header: &str) {
+        let header = cookie_header.trim().to_owned();
+        let csrf = cookie_value(&header, CSRF_COOKIE);
+        *self.inner.cookies.lock().unwrap() = header;
+        if let Some(csrf) = csrf {
+            *self.inner.csrf.lock().unwrap() = csrf;
+        }
+    }
+
+    /// Whether a signed-in session was installed.
+    pub fn has_session_cookies(&self) -> bool {
+        cookie_value(&self.cookie_header(), SESSION_COOKIE).is_some()
+    }
+
+    pub fn cookie_header(&self) -> String {
+        self.inner.cookies.lock().unwrap().clone()
     }
 
     pub async fn board(&self, username: &str, slug: &str) -> Result<Value> {
@@ -77,11 +99,13 @@ impl PinterestClient {
     }
 
     fn build_request(&self, url: &str, referer: &str) -> reqwest::RequestBuilder {
-        let cookies = self.inner.cookies.lock().unwrap().clone();
-        let cookie = if cookies.is_empty() {
-            format!("csrftoken={}", self.inner.csrf)
-        } else {
-            cookies
+        let cookie = {
+            let cookies = self.inner.cookies.lock().unwrap().clone();
+            if cookies.is_empty() {
+                format!("csrftoken={}", self.inner.csrf.lock().unwrap())
+            } else {
+                cookies
+            }
         };
         self.inner
             .http
@@ -263,6 +287,14 @@ enum Outcome {
 
 fn retryable_transport(err: &reqwest::Error) -> bool {
     err.is_connect() || err.is_timeout() || err.is_body()
+}
+
+/// Looks up a single cookie inside a `Cookie` header value.
+pub fn cookie_value(header: &str, name: &str) -> Option<String> {
+    header.split(';').map(str::trim).find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        (key == name && !value.is_empty()).then(|| value.to_owned())
+    })
 }
 
 fn success_check(body: &str) -> bool {
@@ -449,6 +481,25 @@ mod tests {
     fn absolutize_prefixes_relative_paths() {
         assert_eq!(absolutize("/u/b/"), "https://www.pinterest.com/u/b/");
         assert_eq!(absolutize("https://x.test/a"), "https://x.test/a");
+    }
+
+    #[test]
+    fn cookie_value_reads_one_named_pair() {
+        let header = "a=1; csrftoken=tok en; _pinterest_sess=secret";
+        assert_eq!(cookie_value(header, "csrftoken").as_deref(), Some("tok en"));
+        assert_eq!(
+            cookie_value(header, SESSION_COOKIE).as_deref(),
+            Some("secret")
+        );
+        assert_eq!(cookie_value(header, "missing"), None);
+        assert_eq!(cookie_value(header, ""), None);
+        assert_eq!(cookie_value("a=1; csrftoken=", "csrftoken"), None);
+        assert_eq!(cookie_value("", "csrftoken"), None);
+        // Only the first match is honored, like a browser would send it.
+        assert_eq!(
+            cookie_value("_auth=1; _auth=2", "_auth").as_deref(),
+            Some("1")
+        );
     }
 
     fn percent_decode(input: &str) -> String {

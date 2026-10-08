@@ -1,3 +1,4 @@
+mod auth;
 mod board;
 mod cli;
 mod error;
@@ -10,6 +11,7 @@ use clap::Parser;
 
 use crate::board::{Eligibility, PinSource};
 use crate::cli::Args;
+use crate::error::PinpullError;
 use crate::input::BoardRef;
 use crate::pinterest::PinterestClient;
 
@@ -18,7 +20,25 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let board_ref: BoardRef = args.board.parse()?;
 
+    let session = auth::authenticate(args.headless).await?;
+    if !session.is_authenticated() {
+        return Err(PinpullError::NotAuthenticated {
+            message: "the browser handed over no Pinterest session cookie".into(),
+        }
+        .into());
+    }
+    if session.csrf_token().is_none() {
+        eprintln!("pinpull: the session carries no csrftoken cookie; API calls may be rejected");
+    }
+
     let client = PinterestClient::new()?;
+    client.set_cookies(session.cookie_header());
+    if !client.has_session_cookies() {
+        return Err(PinpullError::NotAuthenticated {
+            message: "the session cookie did not reach the API client".into(),
+        }
+        .into());
+    }
     let result = board::enumerate(&client, &board_ref, usize::from(args.jobs)).await?;
 
     let info = &result.board;

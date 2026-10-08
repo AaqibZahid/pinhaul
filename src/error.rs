@@ -38,6 +38,12 @@ pub enum PinpullError {
         message: String,
     },
 
+    #[error("browser automation failed: {message}")]
+    Browser { message: String },
+
+    #[error("not signed in: {message}. Run `pinpull <board> --login` once, then retry.")]
+    NotAuthenticated { message: String },
+
     #[error("background task failed: {0}")]
     Task(#[from] tokio::task::JoinError),
 }
