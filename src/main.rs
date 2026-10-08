@@ -3,6 +3,7 @@ mod board;
 mod cli;
 mod error;
 mod input;
+mod media;
 mod pinterest;
 
 use std::collections::BTreeMap;
@@ -13,6 +14,7 @@ use crate::board::{Eligibility, PinSource};
 use crate::cli::Args;
 use crate::error::PinpullError;
 use crate::input::BoardRef;
+use crate::media::{output_stems, select_media};
 use crate::pinterest::PinterestClient;
 
 #[tokio::main]
@@ -64,6 +66,11 @@ async fn main() -> anyhow::Result<()> {
     let mut ineligible = 0u64;
     let mut unknown = 0u64;
     let mut with_media = 0u64;
+    let mut files = 0u64;
+    let mut images = 0u64;
+    let mut files_video = 0u64;
+    let mut playlists = 0u64;
+    let mut stems: Vec<String> = Vec::new();
     let mut unknown_ids: Vec<&str> = Vec::new();
 
     for pin in &result.pins {
@@ -76,14 +83,28 @@ async fn main() -> anyhow::Result<()> {
                 unknown_ids.push(&pin.id);
             }
         }
-        if let Some(data) = &pin.data {
-            let has_media = ["images", "videos", "carousel", "story_pin_data"]
-                .iter()
-                .any(|&key| data.get(key).is_some_and(|value| !value.is_null()));
-            if has_media {
-                with_media += 1;
+        if pin.eligibility == Eligibility::Ineligible {
+            continue;
+        }
+        let Some(data) = &pin.data else {
+            continue;
+        };
+        let items = select_media(data);
+        if items.is_empty() {
+            continue;
+        }
+        with_media += 1;
+        files += u64::try_from(items.len()).unwrap_or(u64::MAX);
+        for item in &items {
+            if item.kind.is_playlist() {
+                playlists += 1;
+            } else if item.kind.is_video() {
+                files_video += 1;
+            } else {
+                images += 1;
             }
         }
+        stems.extend(output_stems(&pin.id, &items));
     }
 
     println!("\n  by source:");
@@ -95,6 +116,11 @@ async fn main() -> anyhow::Result<()> {
     println!("    ineligible: {ineligible}");
     println!("    unknown:    {unknown}");
     println!("  with media:     {with_media}");
+    println!(
+        "  files to write: {files} ({images} images, {files_video} videos, {playlists} playlists)"
+    );
+    stems.sort_unstable();
+    println!("  distinct stems: {}", stems.len());
 
     if !unknown_ids.is_empty() {
         let total = unknown_ids.len();
