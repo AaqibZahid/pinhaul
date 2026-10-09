@@ -31,7 +31,7 @@ try {
 } finally {
   child.kill();
   await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5000))]);
-  await rm(profile, { recursive: true, force: true });
+  await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
 async function waitForServiceWorker(debugPort) {
