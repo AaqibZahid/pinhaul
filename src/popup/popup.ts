@@ -1,170 +1,182 @@
-// The popup: a window onto the job, not the owner of it.
-//
-// It reads the job from the service worker once a second, so closing and
-// reopening the popup changes nothing about a download in progress.
-
 import { parseBoardRef } from "../shared/boardref";
-import type { JobProgress } from "../shared/types";
 import type { Request } from "../shared/messages";
+import type { BoardRef, BoardSummary, DownloadProgress } from "../shared/types";
 
-const form = document.getElementById("board-form") as HTMLFormElement;
-const input = document.getElementById("board-input") as HTMLInputElement;
-const downloadButton = document.getElementById("download") as HTMLButtonElement;
-const boardLabel = document.getElementById("board") as HTMLParagraphElement;
-const progressPanel = document.getElementById("progress") as HTMLElement;
-const phaseLabel = document.getElementById("phase") as HTMLSpanElement;
-const detailLabel = document.getElementById("detail") as HTMLSpanElement;
-const barFill = document.getElementById("bar-fill") as HTMLDivElement;
-const found = document.getElementById("found") as HTMLElement;
-const downloaded = document.getElementById("downloaded") as HTMLElement;
-const skipped = document.getElementById("skipped") as HTMLElement;
-const failed = document.getElementById("failed") as HTMLElement;
-const message = document.getElementById("message") as HTMLParagraphElement;
-const actionsRow = document.getElementById("actions") as HTMLElement;
-const pauseButton = document.getElementById("pause") as HTMLButtonElement;
-const retryButton = document.getElementById("retry") as HTMLButtonElement;
-const folderButton = document.getElementById("folder") as HTMLButtonElement;
+const refreshButton = byId<HTMLButtonElement>("refresh");
+const connectButton = byId<HTMLButtonElement>("connect");
+const accountLabel = byId<HTMLElement>("account");
+const boardList = byId<HTMLElement>("board-list");
+const empty = byId<HTMLElement>("empty");
+const message = byId<HTMLParagraphElement>("message");
+const saveAs = byId<HTMLInputElement>("save-as");
+const manualForm = byId<HTMLFormElement>("manual-form");
+const boardInput = byId<HTMLInputElement>("board-input");
+const progressPanel = byId<HTMLElement>("progress");
+const phaseLabel = byId<HTMLElement>("phase");
+const detailLabel = byId<HTMLElement>("detail");
+const statsLabel = byId<HTMLElement>("stats");
+const barFill = byId<HTMLElement>("bar-fill");
+const cancelButton = byId<HTMLButtonElement>("cancel");
 
-interface BoardRef {
-  username: string;
-  slug: string;
-}
-
-interface Reply {
+interface Reply<T = unknown> {
   ok: boolean;
-  value?: JobProgress | null;
+  value?: T;
   error?: string;
-  board?: BoardRef | null;
 }
 
-let detected: BoardRef | null = null;
-let paused = false;
+let boards: BoardSummary[] = [];
+let syncing = false;
+let active = false;
 
-function send(request: Request): Promise<Reply> {
-  return chrome.runtime.sendMessage(request) as Promise<Reply>;
+function byId<T extends HTMLElement>(id: string): T {
+  return document.getElementById(id) as T;
 }
 
-function setMessage(text: string, isError = false): void {
+function send<T>(request: Request): Promise<Reply<T>> {
+  return chrome.runtime.sendMessage(request) as Promise<Reply<T>>;
+}
+
+function setMessage(text: string, error = false): void {
   message.textContent = text;
-  message.classList.toggle("error", isError);
-  message.classList.toggle("hidden", text.length === 0);
+  message.classList.toggle("hidden", !text);
+  message.classList.toggle("error", error);
+  connectButton.classList.toggle("hidden", !error);
 }
 
-/** Reads the board the user is looking at. */
-async function detectBoard(): Promise<void> {
-  const reply = await send({ type: "detectBoard" });
-  detected = reply.board ?? null;
-  if (detected) {
-    boardLabel.textContent = `${detected.username}/${detected.slug}`;
-    input.value = `${detected.username}/${detected.slug}`;
+async function sync(): Promise<void> {
+  if (syncing || active) return;
+  syncing = true;
+  refreshButton.classList.add("spinning");
+  setMessage("");
+  const reply = await send<BoardSummary[]>({ type: "syncBoards" });
+  syncing = false;
+  refreshButton.classList.remove("spinning");
+  if (!reply.ok) {
+    accountLabel.textContent = "Pinterest connection needed";
+    renderBoards([]);
+    setMessage(reply.error ?? "Sign in to Pinterest, then refresh.", true);
     return;
   }
-  boardLabel.textContent = "No board on this tab";
+  boards = reply.value ?? [];
+  accountLabel.textContent = boards.length ? `${boards.length} board${boards.length === 1 ? "" : "s"}` : "Your boards";
+  renderBoards(boards);
 }
 
-function boardToUse(): BoardRef | null {
-  const typed = input.value.trim();
-  if (typed) {
-    const parsed = parseBoardRef(typed);
-    if (!parsed.ok) {
-      setMessage(parsed.error, true);
-      return null;
-    }
-    return parsed.ref;
+function renderBoards(items: BoardSummary[]): void {
+  boardList.replaceChildren();
+  empty.classList.toggle("hidden", items.length !== 0);
+  for (const board of items) boardList.append(createBoardCard(board));
+}
+
+function createBoardCard(board: BoardSummary): HTMLElement {
+  const card = document.createElement("article");
+  card.className = "board-card";
+  if (board.thumbnailUrl) {
+    const image = document.createElement("img");
+    image.src = board.thumbnailUrl;
+    image.alt = "";
+    image.loading = "lazy";
+    card.append(image);
+  } else {
+    const placeholder = document.createElement("div");
+    placeholder.className = "thumb-placeholder";
+    placeholder.textContent = "✦";
+    card.append(placeholder);
   }
-  if (detected) return detected;
-  setMessage("Open a Pinterest board, or paste a board link.", true);
-  return null;
+
+  const body = document.createElement("div");
+  body.className = "board-body";
+  const title = document.createElement("strong");
+  title.textContent = board.name;
+  const meta = document.createElement("span");
+  meta.textContent = `${count(board.pinCount, "pin")} · ${count(board.sectionCount, "section")}`;
+  const button = document.createElement("button");
+  button.className = "download-button";
+  button.type = "button";
+  button.textContent = "ZIP";
+  button.title = `Download ${board.name}`;
+  button.disabled = active;
+  button.addEventListener("click", () => void start(board));
+  body.append(title, meta);
+  card.append(body, button);
+  return card;
 }
 
-form.addEventListener("submit", (event) => {
-  event.preventDefault();
-  void startDownload();
-});
+function count(value: number | null, noun: string): string {
+  if (value === null) return noun;
+  return `${value} ${noun}${value === 1 ? "" : "s"}`;
+}
 
-async function startDownload(): Promise<void> {
-  const board = boardToUse();
-  if (!board) return;
-  setMessage("");
-  downloadButton.disabled = true;
-  const same = detected && board.username === detected.username && board.slug === detected.slug;
-  const reply = await send({ type: "start", ref: board, source: same ? "tab" : "input" });
-  if (reply.ok === false) {
+async function start(board: BoardSummary | BoardRef): Promise<void> {
+  if (active) return;
+  active = true;
+  renderBoards(boards);
+  progressPanel.classList.remove("hidden");
+  const reply = await send<DownloadProgress>({ type: "downloadBoard", ref: { username: board.username, slug: board.slug }, saveAs: saveAs.checked });
+  if (!reply.ok) {
+    active = false;
+    progressPanel.classList.add("hidden");
     setMessage(reply.error ?? "The download could not start.", true);
-    downloadButton.disabled = false;
+    renderBoards(boards);
     return;
   }
-  await refresh();
+  show(reply.value ?? null);
+  await poll();
 }
 
-pauseButton.addEventListener("click", () => {
-  paused = !paused;
-  void send(paused ? { type: "pause" } : { type: "resume" }).then(() => refresh());
-});
-
-retryButton.addEventListener("click", () => {
-  void send({ type: "retry" }).then(() => refresh());
-});
-
-folderButton.addEventListener("click", () => {
-  void send({ type: "openFolder" });
-});
-
-/** Mirrors the job onto the screen. */
-function show(progress: JobProgress | null): void {
-  const running = progress !== null && !["done", "error", "paused"].includes(progress.phase);
-  const pausedNow = progress?.phase === "paused";
-
-  downloadButton.disabled = running;
-  downloadButton.textContent = running ? "Downloading…" : pausedNow ? "Resume" : "Download board";
-  downloadButton.classList.toggle("primary", !running);
-  progressPanel.classList.toggle("hidden", progress === null);
-  actionsRow.classList.toggle("hidden", progress === null || progress.phase === "done");
-
-  if (!progress) {
-    setMessage("");
-    return;
+async function poll(): Promise<void> {
+  while (active) {
+    const reply = await send<DownloadProgress | null>({ type: "status" });
+    show(reply.value ?? null);
+    const phase = reply.value?.phase;
+    if (phase === "done" || phase === "cancelled" || phase === "error") {
+      active = false;
+      renderBoards(boards);
+      if (phase === "error") setMessage(reply.value?.error ?? "The download failed.", true);
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 450));
   }
+}
 
-  phaseLabel.textContent = pausedNow ? "Paused" : labelFor(progress.phase);
-  const boardName = progress.board ? progress.board.name : progress.boardKey;
-  detailLabel.textContent = `${boardName} · ${progress.detail}`;
-  const total = progress.discovered;
-  const done = progress.downloaded + progress.skipped + progress.failed;
-  const fraction = total > 0 ? Math.min(1, done / total) : 0;
-  barFill.style.width = `${(fraction * 100).toFixed(1)}%`;
-  found.textContent = String(progress.discovered);
-  downloaded.textContent = String(progress.downloaded);
-  skipped.textContent = String(progress.skipped);
-  failed.textContent = String(progress.failed);
-  pauseButton.textContent = pausedNow ? "Resume" : "Pause";
-  retryButton.disabled = progress.failed === 0;
-
-  if (progress.phase === "error") {
-    setMessage(progress.error ?? "The job stopped.", true);
-    return;
-  }
-  if (progress.phase === "done") {
-    const files = progress.filesDone > 0 ? ` and ${progress.filesDone} files` : "";
-    setMessage(
-      `Finished: ${progress.downloaded} downloaded, ${progress.skipped} skipped, ${progress.failed} failed${files}.`,
-    );
-    return;
-  }
-  setMessage("");
+function show(progress: DownloadProgress | null): void {
+  if (!progress) return;
+  phaseLabel.textContent = labelFor(progress.phase);
+  detailLabel.textContent = progress.detail;
+  statsLabel.textContent = `${progress.processed}/${progress.discovered} pins · ${progress.files} files`;
+  const fraction = progress.discovered ? progress.processed / progress.discovered : progress.phase === "packaging" || progress.phase === "saving" || progress.phase === "done" ? 1 : 0.05;
+  barFill.style.width = `${Math.max(3, Math.min(100, fraction * 100))}%`;
+  cancelButton.disabled = ["done", "cancelled", "error"].includes(progress.phase);
+  progressPanel.classList.toggle("finished", progress.phase === "done");
 }
 
 function labelFor(phase: string): string {
-  if (phase === "resolving") return "Finding the board";
-  if (phase === "discovering") return "Collecting pins";
+  if (phase === "resolving") return "Reading board";
+  if (phase === "discovering") return "Finding pins";
   if (phase === "downloading") return "Downloading";
-  return phase;
+  if (phase === "packaging") return "Building ZIP";
+  if (phase === "saving") return "Saving ZIP";
+  if (phase === "cancelled") return "Stopped";
+  if (phase === "done") return "Complete";
+  if (phase === "error") return "Could not finish";
+  return "Starting";
 }
 
-async function refresh(): Promise<void> {
-  const reply = await send({ type: "status" });
-  show(reply.value ?? null);
-}
+refreshButton.addEventListener("click", () => void sync());
+connectButton.addEventListener("click", () => void send({ type: "openPinterest" }));
+cancelButton.addEventListener("click", () => void send({ type: "cancel" }));
+saveAs.checked = localStorage.getItem("pinpull.saveAs") === "true";
+saveAs.addEventListener("change", () => localStorage.setItem("pinpull.saveAs", String(saveAs.checked)));
+manualForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const parsed = parseBoardRef(boardInput.value);
+  if (!parsed.ok) {
+    setMessage(parsed.error, true);
+    return;
+  }
+  setMessage("");
+  void start(parsed.ref);
+});
 
-void detectBoard().then(() => refresh());
-setInterval(() => void refresh(), 1000);
+void sync();
+setInterval(() => void sync(), 30_000);
