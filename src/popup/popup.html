@@ -29,6 +29,14 @@
         <span>Ask where to save the ZIP</span>
       </label>
 
+      <section id="queue-actions" class="queue-actions hidden" aria-live="polite">
+        <span id="selected-count">0 boards selected</span>
+        <div>
+          <button id="clear-selected" class="link-button" type="button">Clear</button>
+          <button id="download-selected" class="secondary" type="button">Download selected</button>
+        </div>
+      </section>
+
       <section id="boards" class="boards" aria-live="polite">
         <div id="board-list" class="board-list"></div>
         <p id="empty" class="empty hidden">No boards found. Sign in to Pinterest, then refresh.</p>

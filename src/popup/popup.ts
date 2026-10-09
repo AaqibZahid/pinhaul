@@ -10,6 +10,10 @@ const boardList = byId<HTMLElement>("board-list");
 const empty = byId<HTMLElement>("empty");
 const message = byId<HTMLParagraphElement>("message");
 const saveAs = byId<HTMLInputElement>("save-as");
+const queueActions = byId<HTMLElement>("queue-actions");
+const selectedCount = byId<HTMLElement>("selected-count");
+const clearSelected = byId<HTMLButtonElement>("clear-selected");
+const downloadSelected = byId<HTMLButtonElement>("download-selected");
 const manualForm = byId<HTMLFormElement>("manual-form");
 const boardInput = byId<HTMLInputElement>("board-input");
 const progressPanel = byId<HTMLElement>("progress");
@@ -27,6 +31,7 @@ interface Reply<T = unknown> {
 }
 
 let boards: BoardSummary[] = [];
+const selected = new Set<string>();
 let syncing = false;
 let active = false;
 
@@ -74,6 +79,20 @@ function renderBoards(items: BoardSummary[]): void {
 function createBoardCard(board: BoardSummary): HTMLElement {
   const card = document.createElement("article");
   card.className = "board-card";
+  const key = boardKey(board);
+  card.classList.toggle("selected", selected.has(key));
+  const pick = document.createElement("input");
+  pick.className = "board-picker";
+  pick.type = "checkbox";
+  pick.checked = selected.has(key);
+  pick.disabled = active;
+  pick.ariaLabel = `Select ${board.name}`;
+  pick.addEventListener("change", () => {
+    pick.checked ? selected.add(key) : selected.delete(key);
+    card.classList.toggle("selected", pick.checked);
+    renderQueueActions();
+  });
+  card.append(pick);
   if (board.thumbnailUrl) {
     const image = document.createElement("img");
     image.src = board.thumbnailUrl;
@@ -99,10 +118,23 @@ function createBoardCard(board: BoardSummary): HTMLElement {
   button.textContent = "ZIP";
   button.title = `Download ${board.name}`;
   button.disabled = active;
-  button.addEventListener("click", () => void start(board));
+  button.addEventListener("click", () => void start([board]));
   body.append(title, meta);
   card.append(body, button);
   return card;
+}
+
+function boardKey(board: BoardRef): string {
+  return `${board.username}/${board.slug}`;
+}
+
+function renderQueueActions(): void {
+  const count = selected.size;
+  queueActions.classList.toggle("hidden", count === 0);
+  selectedCount.textContent = `${count} board${count === 1 ? "" : "s"} selected`;
+  downloadSelected.textContent = count === 1 ? "Download selected" : `Download ${count} boards`;
+  downloadSelected.disabled = active || count === 0;
+  clearSelected.disabled = active;
 }
 
 function count(value: number | null, noun: string): string {
@@ -110,17 +142,21 @@ function count(value: number | null, noun: string): string {
   return `${value} ${noun}${value === 1 ? "" : "s"}`;
 }
 
-async function start(board: BoardSummary | BoardRef): Promise<void> {
-  if (active) return;
+async function start(items: Array<BoardSummary | BoardRef>): Promise<void> {
+  if (active || items.length === 0) return;
   active = true;
+  selected.clear();
   renderBoards(boards);
+  renderQueueActions();
   progressPanel.classList.remove("hidden");
-  void send<DownloadProgress>({ type: "downloadBoard", ref: { username: board.username, slug: board.slug }, saveAs: saveAs.checked }).then((reply) => {
+  const refs = items.map(({ username, slug }) => ({ username, slug }));
+  void send<DownloadProgress>({ type: "downloadBoards", refs, saveAs: saveAs.checked }).then((reply) => {
     if (reply.ok) return;
     active = false;
     progressPanel.classList.add("hidden");
     setMessage(reply.error ?? "The download could not start.", true);
     renderBoards(boards);
+    renderQueueActions();
   });
   await poll();
 }
@@ -133,6 +169,7 @@ async function poll(): Promise<void> {
     if (phase === "done" || phase === "cancelled" || phase === "error") {
       active = false;
       renderBoards(boards);
+      renderQueueActions();
       if (phase === "error") setMessage(reply.value?.error ?? "The download failed.", true);
       break;
     }
@@ -142,7 +179,8 @@ async function poll(): Promise<void> {
 
 function show(progress: DownloadProgress | null): void {
   if (!progress) return;
-  phaseLabel.textContent = labelFor(progress.phase);
+  const queue = progress.queueTotal && progress.queueTotal > 1 ? ` · ${progress.queuePosition ?? 1}/${progress.queueTotal}` : "";
+  phaseLabel.textContent = `${labelFor(progress.phase)}${queue}`;
   detailLabel.textContent = progress.detail;
   statsLabel.textContent = `${progress.processed}/${progress.discovered} pins · ${progress.files} files`;
   const fraction = progress.discovered ? progress.processed / progress.discovered : progress.phase === "packaging" || progress.phase === "saving" || progress.phase === "done" ? 1 : 0.05;
@@ -166,6 +204,12 @@ function labelFor(phase: string): string {
 refreshButton.addEventListener("click", () => void sync());
 connectButton.addEventListener("click", () => void send({ type: "openPinterest" }));
 cancelButton.addEventListener("click", () => void send({ type: "cancel" }));
+clearSelected.addEventListener("click", () => {
+  selected.clear();
+  renderBoards(boards);
+  renderQueueActions();
+});
+downloadSelected.addEventListener("click", () => void start(boards.filter((board) => selected.has(boardKey(board)))));
 saveAs.checked = localStorage.getItem("pinpull.saveAs") === "true";
 saveAs.addEventListener("change", () => localStorage.setItem("pinpull.saveAs", String(saveAs.checked)));
 manualForm.addEventListener("submit", (event) => {
@@ -176,8 +220,21 @@ manualForm.addEventListener("submit", (event) => {
     return;
   }
   setMessage("");
-  void start(parsed.ref);
+  void start([parsed.ref]);
 });
 
-void sync();
+void initialize();
 setInterval(() => void sync(), 30_000);
+
+async function initialize(): Promise<void> {
+  await sync();
+  const reply = await send<DownloadProgress | null>({ type: "status" });
+  const progress = reply.value;
+  if (!progress || ["done", "cancelled", "error"].includes(progress.phase)) return;
+  active = true;
+  progressPanel.classList.remove("hidden");
+  renderBoards(boards);
+  renderQueueActions();
+  show(progress);
+  await poll();
+}
