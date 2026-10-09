@@ -67,9 +67,14 @@ impl Downloader {
     /// lets a repeated run skip its work.
     pub async fn fetch(&self, item: &MediaItem, stem: &str, dir: &Path) -> Result<Fetched> {
         std::fs::create_dir_all(dir).map_err(PinpullError::Io)?;
+        // A stem names a pin Pinterest told us about and an extension comes from
+        // a media URL, so neither is trusted to be a plain file name. They are
+        // checked before any file is opened, rather than at each join.
+        refuse_unusable_name(stem, &item.url, "pin id")?;
         match item.kind {
             MediaKind::Image | MediaKind::VideoFile => {
                 let extension = url_extension(&item.url).unwrap_or("bin");
+                refuse_unusable_name(extension, &item.url, "extension")?;
                 if is_complete(&dir.join(format!("{stem}.{extension}"))) {
                     return Ok(Fetched::AlreadyPresent(
                         dir.join(format!("{stem}.{extension}")),
@@ -86,6 +91,28 @@ impl Downloader {
             }
         }
     }
+}
+
+/// Refuses a name that is not a single path component of plain characters.
+///
+/// A pin id and a file extension both arrive from Pinterest, so a name carrying
+/// a separator or a parent reference would write media outside the board's own
+/// directory. Real pins are named only with digits, and by `image`, `video` or
+/// a slot number; real extensions are letters. Anything else is refused rather
+/// than sanitized, because a sanitized name could silently collide with
+/// another pin's.
+fn refuse_unusable_name(name: &str, url: &str, what: &str) -> Result<()> {
+    let plain = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'));
+    if plain {
+        return Ok(());
+    }
+    Err(PinpullError::Download {
+        url: url.to_owned(),
+        message: format!("{what} {name:?} is not usable as a file name"),
+    })
 }
 
 /// Whether the finished file is already on disk, so a repeated run does not
@@ -479,6 +506,44 @@ mod tests {
         assert_eq!(url_extension("https://v1.pinimg.com/landing"), None);
         assert_eq!(url_extension("https://v1.pinimg.com/landing/"), None);
         assert_eq!(url_extension(""), None);
+    }
+
+    #[test]
+    fn names_pinterest_produces_are_usable_file_names() {
+        // Pin ids are digits, labels are `image`, `video` or a slot number,
+        // and extensions are letters.
+        for name in [
+            "1136033074790855749",
+            "1136033074790855749_image",
+            "1136033074790855749_1",
+            "image",
+            "video",
+            "jpg",
+            "webp",
+            "ts",
+        ] {
+            refuse_unusable_name(name, "https://x", "pin id")
+                .unwrap_or_else(|_| panic!("{name} was refused"));
+        }
+    }
+
+    #[test]
+    fn a_name_that_would_leave_the_board_directory_is_refused() {
+        for name in [
+            "",
+            "..",
+            "../escape",
+            "..\\..\\escape",
+            "a/b",
+            "a\\b",
+            "pin id",
+        ] {
+            let err = refuse_unusable_name(name, "https://x", "pin id").unwrap_err();
+            assert!(
+                matches!(err, PinpullError::Download { .. }),
+                "{name:?} was accepted"
+            );
+        }
     }
 
     #[test]
