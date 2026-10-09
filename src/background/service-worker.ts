@@ -11,6 +11,7 @@ let active: {
   controller: AbortController;
   progress: DownloadProgress;
   downloadId?: number;
+  promise: Promise<void>;
 } | null = null;
 let lastProgress: DownloadProgress | null = null;
 
@@ -23,8 +24,12 @@ async function handle(message: Request): Promise<unknown> {
   switch (message.type) {
     case "syncBoards":
       return { ok: true, value: await syncBoards() };
-    case "downloadBoard":
-      return startDownload(message.ref, message.saveAs);
+    case "downloadBoard": {
+      const started = startDownload(message.ref, message.saveAs);
+      if (!started.ok) return started.reply;
+      await started.promise;
+      return { ok: true, value: lastProgress };
+    }
     case "status":
       return { ok: true, value: active?.progress ?? lastProgress };
     case "cancel":
@@ -51,8 +56,12 @@ async function syncBoards(): Promise<BoardSummary[]> {
   }
 }
 
-function startDownload(ref: BoardRef, saveAs: boolean): { ok: boolean; value?: DownloadProgress; error?: string } {
-  if (active) return { ok: false, error: "A board download is already in progress." };
+function startDownload(ref: BoardRef, saveAs: boolean): {
+  ok: boolean;
+  reply: { ok: boolean; value?: DownloadProgress; error?: string };
+  promise?: Promise<void>;
+} {
+  if (active) return { ok: false, reply: { ok: false, error: "A board download is already in progress." } };
   const controller = new AbortController();
   const progress: DownloadProgress = {
     phase: "idle",
@@ -65,9 +74,9 @@ function startDownload(ref: BoardRef, saveAs: boolean): { ok: boolean; value?: D
     detail: "Starting",
     updatedAt: Date.now(),
   };
-  active = { controller, progress };
-  void runDownload(ref, saveAs, controller);
-  return { ok: true, value: progress };
+  const promise = runDownload(ref, saveAs, controller);
+  active = { controller, progress, promise };
+  return { ok: true, reply: { ok: true, value: progress }, promise };
 }
 
 async function runDownload(ref: BoardRef, saveAs: boolean, controller: AbortController): Promise<void> {

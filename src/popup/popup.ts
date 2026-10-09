@@ -112,15 +112,13 @@ async function start(board: BoardSummary | BoardRef): Promise<void> {
   active = true;
   renderBoards(boards);
   progressPanel.classList.remove("hidden");
-  const reply = await send<DownloadProgress>({ type: "downloadBoard", ref: { username: board.username, slug: board.slug }, saveAs: saveAs.checked });
-  if (!reply.ok) {
+  void send<DownloadProgress>({ type: "downloadBoard", ref: { username: board.username, slug: board.slug }, saveAs: saveAs.checked }).then((reply) => {
+    if (reply.ok) return;
     active = false;
     progressPanel.classList.add("hidden");
     setMessage(reply.error ?? "The download could not start.", true);
     renderBoards(boards);
-    return;
-  }
-  show(reply.value ?? null);
+  });
   await poll();
 }
 
