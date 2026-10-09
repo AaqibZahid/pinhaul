@@ -6,7 +6,13 @@ const input = path.join(root, "dist");
 const outputDir = path.join(root, "artifacts");
 const manifestPath = path.join(input, "manifest.json");
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-const required = ["manifest.json", "background/service-worker.js", "popup/popup.html"];
+const required = [
+  "manifest.json",
+  "background/service-worker.js",
+  "offscreen/offscreen.html",
+  "offscreen/offscreen.js",
+  "popup/popup.html",
+];
 
 for (const file of required) {
   try {
