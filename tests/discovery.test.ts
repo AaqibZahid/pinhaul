@@ -122,12 +122,15 @@ describe("BoardCrawler", () => {
 
     const crawler = new BoardCrawler(fake.client(), "board", BoardCrawler.start("board", [{ id: "s1", name: "S" }]));
     const seen: string[] = [];
+    const sectionNames: string[] = [];
     let page = await crawler.nextPage();
     while (page) {
       seen.push(...page.pinIds);
+      if (page.sectionName) sectionNames.push(page.sectionName);
       page = await crawler.nextPage();
     }
     expect(seen).toEqual(["1", "2", "3", "2", "9"]);
+    expect(sectionNames).toEqual(["S"]);
     expect(crawler.remaining).toBe(0);
   });
 
