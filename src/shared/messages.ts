@@ -5,6 +5,7 @@ import type { BoardRef } from "./types";
 export type Request =
   | { type: "syncBoards" }
   | { type: "downloadBoard"; ref: BoardRef; saveAs: boolean }
+  | { type: "downloadBoards"; refs: BoardRef[]; saveAs: boolean }
   | { type: "status" }
   | { type: "cancel" }
   | { type: "openPinterest" };

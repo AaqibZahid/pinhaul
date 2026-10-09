@@ -3,6 +3,7 @@ import type { BoardRef, BoardSummary, BoardSyncResult, DownloadProgress } from "
 import { listAccountBoards } from "./account";
 import { downloadBoard } from "./download";
 import { PinterestClient, PinterestError, type PinterestErrorKind } from "./pinterest";
+import { runBoardQueue } from "./queue";
 
 const client = new PinterestClient({ intervalMs: 110 });
 const BOARDS_KEY = "accountBoards";
@@ -29,7 +30,13 @@ async function handle(message: Request): Promise<unknown> {
     case "syncBoards":
       return { ok: true, value: await syncBoards() };
     case "downloadBoard": {
-      const started = startDownload(message.ref, message.saveAs);
+      const started = startDownloads([message.ref], message.saveAs);
+      if (!started.ok) return started.reply;
+      await started.promise;
+      return { ok: true, value: lastProgress };
+    }
+    case "downloadBoards": {
+      const started = startDownloads(message.refs, message.saveAs);
       if (!started.ok) return started.reply;
       await started.promise;
       return { ok: true, value: lastProgress };
@@ -61,12 +68,14 @@ async function syncBoards(): Promise<BoardSyncResult> {
   }
 }
 
-function startDownload(ref: BoardRef, saveAs: boolean): {
+function startDownloads(refs: BoardRef[], saveAs: boolean): {
   ok: boolean;
   reply: { ok: boolean; value?: DownloadProgress; error?: string };
   promise?: Promise<void>;
 } {
   if (active) return { ok: false, reply: { ok: false, error: "A board download is already in progress." } };
+  const ref = refs[0];
+  if (!ref) return { ok: false, reply: { ok: false, error: "Choose at least one board." } };
   const controller = new AbortController();
   const progress: DownloadProgress = {
     phase: "idle",
@@ -79,21 +88,26 @@ function startDownload(ref: BoardRef, saveAs: boolean): {
     detail: "Starting",
     updatedAt: Date.now(),
   };
-  const promise = runDownload(ref, saveAs, controller);
+  const promise = runDownloads(refs, saveAs, controller);
   active = { controller, progress, promise };
   return { ok: true, reply: { ok: true, value: progress }, promise };
 }
 
-async function runDownload(ref: BoardRef, saveAs: boolean, controller: AbortController): Promise<void> {
+async function runDownloads(refs: BoardRef[], saveAs: boolean, controller: AbortController): Promise<void> {
   try {
-    const result = await downloadBoard(
-      ref,
-      saveAs,
-      {
-        client,
-        save: (blob, filename, ask) => saveZip(blob, filename, ask),
-        wait: waitForDownload,
-      },
+    const result = await runBoardQueue(
+      refs,
+      (ref, onProgress, signal) => downloadBoard(
+        ref,
+        saveAs,
+        {
+          client,
+          save: (blob, filename, ask) => saveZip(blob, filename, ask),
+          wait: waitForDownload,
+        },
+        onProgress,
+        signal,
+      ),
       (progress) => {
         if (active?.controller === controller) active.progress = progress;
       },
@@ -110,7 +124,7 @@ async function runDownload(ref: BoardRef, saveAs: boolean, controller: AbortCont
         : null;
     }
   } finally {
-    if (active?.controller === controller && active.objectUrl) revokeObjectUrl(active.objectUrl);
+    if (active?.controller === controller && active.downloadId !== undefined) releaseObjectUrl(active.downloadId);
     active = null;
   }
 }
@@ -125,6 +139,7 @@ async function saveZip(blob: Blob, filename: string, saveAs: boolean): Promise<n
       if (active.controller.signal.aborted) {
         await chrome.downloads.cancel(id).catch(() => undefined);
         await chrome.downloads.removeFile(id).catch(() => undefined);
+        releaseObjectUrl(id);
         throw new DOMException("Download cancelled", "AbortError");
       }
     }
@@ -183,6 +198,7 @@ async function cancelDownload(): Promise<void> {
   if (current.downloadId === undefined) return;
   await chrome.downloads.cancel(current.downloadId).catch(() => undefined);
   await chrome.downloads.removeFile(current.downloadId).catch(() => undefined);
+  releaseObjectUrl(current.downloadId);
 }
 
 function waitForDownload(id: number, signal: AbortSignal): Promise<void> {
@@ -190,6 +206,7 @@ function waitForDownload(id: number, signal: AbortSignal): Promise<void> {
     const finish = (error?: Error) => {
       chrome.downloads.onChanged.removeListener(listener);
       signal.removeEventListener("abort", aborted);
+      releaseObjectUrl(id);
       error ? reject(error) : resolve();
     };
     const check = async () => {
@@ -211,6 +228,13 @@ function waitForDownload(id: number, signal: AbortSignal): Promise<void> {
     signal.addEventListener("abort", aborted, { once: true });
     void check();
   });
+}
+
+function releaseObjectUrl(downloadId: number): void {
+  if (active?.downloadId !== downloadId || !active.objectUrl) return;
+  revokeObjectUrl(active.objectUrl);
+  delete active.objectUrl;
+  delete active.downloadId;
 }
 
 function isAbort(error: unknown): boolean {
