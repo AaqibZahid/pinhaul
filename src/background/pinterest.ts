@@ -52,6 +52,11 @@ export interface ResourceEnvelope {
   body?: { response?: { error?: { message?: string; http_status?: number } } };
 }
 
+export interface PinterestGateway {
+  getData<T = unknown>(resource: string, options: Record<string, unknown>, sourceUrl: string): Promise<T>;
+  getResource(resource: string, options: Record<string, unknown>, sourceUrl: string): Promise<ResourceEnvelope>;
+}
+
 export interface ClientOptions {
   fetch?: typeof fetch;
   /** Milliseconds between two requests, so a large board is not throttled. */
@@ -78,7 +83,11 @@ export class PinterestClient {
   private nextSlot = 0;
 
   constructor(options: ClientOptions = {}) {
-    this.fetchFn = options.fetch ?? fetch;
+    // The extension service worker's fetch has to be called as the global, not
+    // as a detached function, so the default is a bound call.
+    this.fetchFn =
+      options.fetch ??
+      ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
     this.intervalMs = options.intervalMs ?? 110;
     this.maxAttempts = options.maxAttempts ?? 5;
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
