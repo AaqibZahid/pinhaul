@@ -9,15 +9,21 @@
   <body>
     <main id="app">
       <header class="topbar">
-        <div>
-          <p class="eyebrow">Pinterest archive</p>
-          <h1>Pinpull</h1>
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true"><span>↓</span></div>
+          <div>
+            <p class="eyebrow">Pinterest archive</p>
+            <h1>Pinpull</h1>
+          </div>
         </div>
         <button id="refresh" class="icon-button" type="button" title="Refresh boards" aria-label="Refresh boards">↻</button>
       </header>
 
+      <p class="tagline">Save the whole board.<br /><em>Keep every section.</em></p>
+
       <section class="intro">
-        <div>
+        <div class="account-state">
+          <span class="status-dot" aria-hidden="true"></span>
           <strong id="account">Your boards</strong>
           <p id="message" class="message hidden"></p>
         </div>
@@ -38,12 +44,16 @@
       </section>
 
       <section id="boards" class="boards" aria-live="polite">
+        <div class="list-heading"><span>Your collection</span><span>Choose one or many</span></div>
         <div id="board-list" class="board-list"></div>
         <p id="empty" class="empty hidden">No boards found. Sign in to Pinterest, then refresh.</p>
       </section>
 
       <section class="manual">
-        <p class="section-title">Download another public board</p>
+        <div>
+          <p class="section-title">Another public board</p>
+          <p class="section-copy">Paste a Pinterest link or board name.</p>
+        </div>
         <form id="manual-form" autocomplete="off">
           <input id="board-input" type="text" placeholder="username/boardname or Pinterest URL" spellcheck="false" />
           <button id="manual-download" class="secondary" type="submit">Download</button>
