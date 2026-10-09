@@ -212,16 +212,29 @@ async fn main() -> anyhow::Result<()> {
     }
     layout.store.save(&checkpoint)?;
 
-    let tally = checkpoint.tally();
+    // The invariant is over the pins this run discovered, not over the whole
+    // checkpoint: a checkpoint also holds pins from earlier runs, which a later
+    // feed or section page may legitimately not repeat.
+    let mut downloaded = 0u64;
+    let mut skipped = 0u64;
+    let mut failed = 0u64;
+    for pin in &enumerated.pins {
+        match checkpoint.state_of(&pin.id).and_then(|state| state.kind()) {
+            Some(pinpull::state::StateKind::Downloaded) => downloaded += 1,
+            Some(pinpull::state::StateKind::Skipped) => skipped += 1,
+            Some(pinpull::state::StateKind::Failed) => failed += 1,
+            None => {}
+        }
+    }
     println!("\n  by source:");
     for (source, count) in &by_source {
         println!("    {source}: {count}");
     }
     println!("\n  discovered: {}", discovered);
-    println!("    downloaded: {}", tally.downloaded);
-    println!("    skipped:    {}", tally.skipped);
-    println!("    failed:     {}", tally.failed);
-    println!("    total:      {}", tally.total());
+    println!("    downloaded: {downloaded}");
+    println!("    skipped:    {skipped}");
+    println!("    failed:     {failed}");
+    println!("    total:      {}", downloaded + skipped + failed);
     println!("  this run wrote: {images} images, {video_files} videos, {playlists} playlists");
     println!("  media in:     {}", layout.media.display());
     println!("  checkpoint:   {}", layout.store.path().display());
@@ -236,30 +249,17 @@ async fn main() -> anyhow::Result<()> {
         println!();
     }
 
-    // The accounting invariant: every discovered pin is accounted for, and the
-    // checkpoint's own view of the run agrees with the board it was written for.
-    if tally.total() != discovered {
+    // The accounting invariant: every pin this run discovered reached one of the
+    // three outcomes, so nothing dropped out silently.
+    if downloaded + skipped + failed != u64::try_from(discovered).unwrap_or(u64::MAX) {
         return Err(PinpullError::Pinterest {
             resource: "accounting",
             message: format!(
-                "discovered {discovered} pins but the checkpoint accounts for {}",
-                tally.total()
+                "discovered {discovered} pins but accounted for {}",
+                downloaded + skipped + failed
             ),
         }
         .into());
-    }
-    if !checkpoint.is_balanced() {
-        return Err(PinpullError::Pinterest {
-            resource: "accounting",
-            message: "the checkpoint lost a pin between the run and its own tally".into(),
-        }
-        .into());
-    }
-    if tally.pending > 0 {
-        eprintln!(
-            "pinpull: {} pins never reached an outcome and were not counted",
-            tally.pending
-        );
     }
     Ok(())
 }

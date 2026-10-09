@@ -1,6 +1,8 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use serde_json::{Value, json};
 
 use crate::error::{PinpullError, Result};
@@ -97,7 +99,22 @@ impl PinterestClient {
     pub async fn pin_detail(&self, id: &str) -> Result<Value> {
         let html = self.pin_page(id).await?;
         match relay_pin_data(&html) {
-            PinRecord::Found(data) => Ok(data),
+            PinRecord::Found(data) => {
+                // The record has to be the pin that was asked for. A page can
+                // carry another pin's record, and answering with that would
+                // classify one pin as another without anything noticing.
+                match record_pin_id(&data).as_deref() {
+                    Some(found) if found == id => Ok(data),
+                    Some(found) => Err(PinpullError::Pinterest {
+                        resource: "Pin",
+                        message: format!("the page carried pin {found} instead of {id}"),
+                    }),
+                    None => Err(PinpullError::Pinterest {
+                        resource: "Pin",
+                        message: "the pin record did not name which pin it was".into(),
+                    }),
+                }
+            }
             PinRecord::Error(kind) => Err(PinpullError::Pinterest {
                 resource: "Pin",
                 message: format!("Pinterest answered this pin as {kind}"),
@@ -423,6 +440,26 @@ pub fn absolutize(path: &str) -> String {
 
 /// The global Pinterest's pin pages register their fetched payloads behind.
 const RELAY_MARKER: &str = "window.__PWS_RELAY_REGISTER_COMPLETED_REQUEST__";
+
+/// Which pin a record is about, whichever way the record names it.
+///
+/// `entityId` is the plain numeric pin id; `id` is the base64 node id that
+/// decodes to the same one, so either names the pin.
+pub fn record_pin_id(data: &Value) -> Option<String> {
+    if let Some(entity) = data.get("entityId").and_then(Value::as_str) {
+        return (!entity.is_empty()).then(|| entity.to_owned());
+    }
+    let id = data.get("id").and_then(Value::as_str)?;
+    if !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()) {
+        // A plain numeric id already names the pin.
+        return Some(id.to_owned());
+    }
+    let node = STANDARD
+        .decode(id)
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())?;
+    node.strip_prefix("Pin:").map(str::to_owned)
+}
 
 /// Reads a pin's own record out of its pin page.
 ///

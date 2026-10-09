@@ -1,4 +1,4 @@
-//! Interruption and resume.
+﻿//! Interruption and resume.
 //!
 //! A run that stops part way through must pick up where it left off, must not
 //! redo finished work, and must keep the accounting exact. These tests use a
@@ -107,8 +107,19 @@ async fn a_partial_file_does_not_count_as_a_finished_pin() {
     assert!(!pinpull::download::is_complete(&dir.join("1.png")));
 
     // So the pin is still attempted, and the restart produces the full body.
+    // One chunk of every pin keeps the detail fetches in board order, so the
+    // fixture's replies land on the pins they were written for.
     let board: BoardRef = "user/board".parse().unwrap();
-    let pins = enumerate(&client(&fixture), &board, 1).await.unwrap();
+    let pins = enumerate(&client(&fixture), &board, 3).await.unwrap();
+    let failures: Vec<String> = pins
+        .pins
+        .iter()
+        .filter_map(|pin| pin.failure.clone())
+        .collect();
+    assert!(
+        failures.is_empty(),
+        "every pin's record should be read: {failures:?}"
+    );
     let media = pinpull::media::select_media(pins.pins[0].data.as_ref().unwrap());
     let outcome = match downloader.fetch(&media[0], "1", &dir).await.unwrap() {
         pinpull::download::Fetched::Written(outcome) => outcome,

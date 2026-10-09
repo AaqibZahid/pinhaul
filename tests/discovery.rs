@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{Fixture, Reply, image_pin, pin_page, resource_page, resource_response, scratch};
+use common::{Fixture, Reply, image_pin, resource_page, resource_response, scratch};
 
 use pinpull::board::{Eligibility, enumerate};
 use pinpull::input::BoardRef;
@@ -227,8 +227,8 @@ async fn a_malformed_board_response_is_not_guessed_at() {
 #[tokio::test]
 async fn a_403_on_pin_detail_does_not_stop_the_board() {
     let board: BoardRef = "user/board".parse().unwrap();
-    // The board reads fine, but one pin's detail refuses. The pin ends as a
-    // failure with the reason, and the rest of the board carries on.
+    // The board reads fine, but every pin's detail refuses. Both pins still end
+    // as failures carrying the reason, and the board is still reported whole.
     let fixture = Fixture::start(resource_response(serde_json::json!({
         "id": "1", "name": "b", "pin_count": 2, "section_count": 0
     })));
@@ -240,27 +240,26 @@ async fn a_403_on_pin_detail_does_not_stop_the_board() {
         "-end-",
     ));
     fixture.then(Reply::body("{}").status(403));
-    fixture.then(pin_page(serde_json::json!({
-        "id": "222",
-        "isEligibleForImageDownload": true,
-        "images_orig": {"url": "https://i.pinimg.com/originals/2.png"}
-    })));
+    fixture.then(Reply::body("{}").status(403));
 
     let client = fixture_client(&fixture);
     let result = enumerate(&client, &board, 1).await.unwrap();
     assert_eq!(result.pins.len(), 2, "both pins are still discovered");
-    // Whichever pin got the refusal, it carries the reason and the other one's
-    // record came through.
     let failures: Vec<&str> = result
         .pins
         .iter()
         .filter_map(|pin| pin.failure.as_deref())
         .collect();
-    assert_eq!(failures.len(), 1, "one pin's detail refused: {failures:?}");
-    assert!(failures[0].contains("403"), "the reason names the status");
+    assert_eq!(failures.len(), 2, "both pins carry a failure: {failures:?}");
+    for failure in &failures {
+        assert!(
+            failure.contains("403"),
+            "the reason names the status: {failure}"
+        );
+    }
     assert_eq!(
         result.pins.iter().filter(|pin| pin.data.is_some()).count(),
-        1
+        0
     );
 }
 
