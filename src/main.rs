@@ -124,11 +124,14 @@ async fn main() -> anyhow::Result<()> {
             }
             Eligibility::Unknown => {
                 // Unknown eligibility is counted and reported, never dropped.
+                // The reason is whatever actually happened: a pin whose detail
+                // could not be read is not the same as one whose record simply
+                // has no flag, and the difference decides whether a retry helps.
                 unknown_ids.push(&pin.id);
-                checkpoint.set(
-                    &pin.id,
-                    Record::failed("download eligibility is absent from the pin record"),
-                );
+                let reason = pin.failure.clone().unwrap_or_else(|| {
+                    "download eligibility is absent from the pin record".to_owned()
+                });
+                checkpoint.set(&pin.id, Record::failed(reason));
                 continue;
             }
         }
