@@ -137,7 +137,7 @@ failed, and the file names it produced. Delete it to force a full re-scan.
 
 ## Testing status
 
-147 automated tests pass: unit tests for the pure logic, and integration tests
+148 automated tests pass: unit tests for the pure logic, and integration tests
 that drive discovery, pagination, sections, duplicate pins, downloads, HLS
 joining and decryption, range resume, retry behaviour and checkpoint recovery
 against a fixture server that answers canned responses. No credentials and no
