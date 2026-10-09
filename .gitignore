@@ -2,6 +2,7 @@
 
 # build output
 /dist/
+/artifacts/
 
 # scratch
 *.log
