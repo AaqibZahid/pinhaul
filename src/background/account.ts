@@ -35,7 +35,10 @@ async function currentUser(client: PinterestGateway): Promise<Record<string, unk
   for (const options of [{ field_set_key: "detailed" }, { username: "me", field_set_key: "detailed" }]) {
     try {
       const value = await client.getData<unknown>("UserResource", options, "/");
-      if (value && typeof value === "object") return value as Record<string, unknown>;
+      const user = value && typeof value === "object" ? value as Record<string, unknown> : null;
+      if (user && (text(user.username) || text(user.slug) || text(user.name))) return user;
+      const nested = user?.user;
+      if (nested && typeof nested === "object") return nested as Record<string, unknown>;
     } catch {
       // Pinterest has used both forms for this resource. Try the other shape.
     }
@@ -79,11 +82,11 @@ function boardOf(raw: unknown, fallbackUsername: string): BoardSummary | null {
 }
 
 function thumbnailOf(record: Record<string, unknown>): string | undefined {
-  for (const key of ["image_thumbnail_url", "image_url", "cover_image_url"]) {
+  for (const key of ["image_thumbnail_url", "image_url", "cover_image_url", "cover_image_url_small"]) {
     const value = text(record[key]);
     if (value) return value.startsWith("/") ? `https://www.pinterest.com${value}` : value;
   }
-  const cover = record.cover_image ?? record.cover;
+  const cover = record.cover_image ?? record.cover ?? record.images;
   if (cover && typeof cover === "object") {
     const value = text((cover as Record<string, unknown>).url);
     if (value) return value.startsWith("/") ? `https://www.pinterest.com${value}` : value;

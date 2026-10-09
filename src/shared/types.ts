@@ -22,6 +22,11 @@ export interface BoardInfo {
 /** A board shown in the account picker or entered manually. */
 export type BoardSummary = BoardInfo & { username: string; slug: string };
 
+export interface BoardSyncResult {
+  boards: BoardSummary[];
+  stale: boolean;
+}
+
 /** How a chosen media candidate has to be fetched. */
 export type MediaKind = "image" | "video" | "hls";
 

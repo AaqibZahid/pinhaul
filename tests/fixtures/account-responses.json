@@ -1,0 +1,48 @@
+{
+  "user": {
+    "resource_response": {
+      "status": "success",
+      "data": {
+        "username": "alice"
+      }
+    }
+  },
+  "pages": [
+    {
+      "resource_response": {
+        "status": "success",
+        "bookmark": ["next-page"],
+        "data": {
+          "boards": [
+            {
+              "id": "1",
+              "name": "Ideas",
+              "slug": "ideas",
+              "pin_count": "4",
+              "section_count": 1,
+              "image_thumbnail_url": "/thumb.jpg"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "resource_response": {
+        "status": "success",
+        "bookmark": "-end-",
+        "data": [
+          {
+            "id": "2",
+            "title": "Private",
+            "url": "/alice/private/",
+            "pinCount": 0,
+            "sectionCount": 0,
+            "cover": {
+              "url": "https://i.pinimg.com/236x/private.jpg"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
