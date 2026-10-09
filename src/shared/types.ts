@@ -87,7 +87,7 @@ export interface Job {
   /** Files queued or downloading, keyed by Chrome's download id. */
   files: Record<string, FileRecord>;
   /** Chrome download ids waiting for their turn. */
-  queue: QueuedFile[];
+
   error?: string;
   createdAt: number;
   updatedAt: number;
@@ -98,15 +98,6 @@ export interface FileRecord {
   pinId: string;
   filename: string;
   state: "in_progress" | "complete" | "interrupted";
-}
-
-export interface QueuedFile {
-  pinId: string;
-  url: string;
-  filename: string;
-  kind: MediaKind;
-  /** Media index within the pin, for labeling. */
-  index: number;
 }
 
 /** Progress numbers the popup shows. */

@@ -9,7 +9,7 @@
 
 import type { BoardInfo, BoardRef, DiscoveryStream } from "../shared/types";
 import { isPinItem, pinIdOf } from "../shared/pins";
-import type { PinterestClient } from "./pinterest";
+import type { PinterestGateway } from "./ports";
 import { PinterestError } from "./pinterest";
 
 
@@ -20,7 +20,7 @@ export interface ResolvedBoard {
 }
 
 /** Reads the board Pinterest actually holds, including its real name. */
-export async function resolveBoard(client: PinterestClient, ref: BoardRef, sourceUrl: string): Promise<ResolvedBoard> {
+export async function resolveBoard(client: PinterestGateway, ref: BoardRef, sourceUrl: string): Promise<ResolvedBoard> {
   const data = (await client.getData<Record<string, unknown>>(
     "BoardResource",
     { slug: ref.slug, username: ref.username, field_set_key: "detailed" },
@@ -51,7 +51,7 @@ export interface Section {
 }
 
 /** Every section of a board, by name and id. */
-export async function loadSections(client: PinterestClient, boardId: string): Promise<Section[]> {
+export async function loadSections(client: PinterestGateway, boardId: string): Promise<Section[]> {
   const sections: Section[] = [];
   let bookmark: string | null = null;
   for (let page = 0; page < 50; page++) {
@@ -79,7 +79,7 @@ export class BoardCrawler {
   private index = 0;
 
   constructor(
-    private readonly client: PinterestClient,
+    private readonly client: PinterestGateway,
     private readonly boardId: string,
     streams: DiscoveryStream[],
   ) {
