@@ -72,5 +72,7 @@ export interface DownloadProgress {
   failed: number;
   detail: string;
   error?: string;
+  queuePosition?: number;
+  queueTotal?: number;
   updatedAt: number;
 }
