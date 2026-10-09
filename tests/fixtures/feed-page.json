@@ -1,0 +1,43 @@
+{
+  "resource_response": {
+    "status": "success",
+    "bookmark": "Y2JZakk0ZVU1WWR6Tk5SR3MxVFdwWk",
+    "data": [
+      {
+        "node_id": "UGluOjExMzYwMzMwNzQ3OTA4NTU3NDk=",
+        "id": "1136033074790855749",
+        "type": "pin",
+        "is_video": false,
+        "images": {
+          "474x": { "url": "https://i.pinimg.com/474x/4c/90/fb/4c90fb11eaf57db4804c91cc4d8982fc.jpg", "width": 474, "height": 714 },
+          "736x": { "url": "https://i.pinimg.com/736x/4c/90/fb/4c90fb11eaf57db4804c91cc4d8982fc.jpg", "width": 736, "height": 1110 },
+          "orig": { "url": "https://i.pinimg.com/originals/4c/90/fb/4c90fb11eaf57db4804c91cc4d8982fc.jpg", "width": 1989, "height": 3000 }
+        }
+      },
+      {
+        "id": "1136033074790855750",
+        "type": "pin",
+        "images": {
+          "orig": { "url": "https://i.pinimg.com/originals/aa/bb/second.jpg", "width": 1200, "height": 1600 }
+        },
+        "carousel_data": [
+          { "images": { "orig": { "url": "https://i.pinimg.com/originals/aa/bb/c1.jpg", "width": 100, "height": 100 } } },
+          { "images": { "orig": { "url": "https://i.pinimg.com/originals/aa/bb/c2.jpg", "width": 100, "height": 100 } } },
+          { "images": { "orig": { "url": "https://i.pinimg.com/originals/aa/bb/c3.jpg", "width": 100, "height": 100 } } }
+        ]
+      },
+      {
+        "node_id": "UGluOjExMzYwMzMwNzQ3OTA4NTU3NDk=",
+        "id": "1136033074790855749",
+        "type": "pin"
+      },
+      {
+        "id": "GtSJzuRT",
+        "story_type": "related_interests_module",
+        "title": { "format": "Related Interests" },
+        "content_ids": [],
+        "type": "story"
+      }
+    ]
+  }
+}

@@ -35,10 +35,11 @@ export function parseBoardRef(input: string): BoardRefResult {
   if (looksLikeUrl) return parseUrl(trimmed);
 
   const segments = trimmed.split("/").filter((segment) => segment.length > 0);
-  if (segments.length === 1) {
+  const [first, second] = segments;
+  if (!first || !second) {
     return { ok: false, error: `"${trimmed}" is not a board. Use username/boardname.` };
   }
-  return build(segments[0], segments[1], trimmed);
+  return build(first, second, trimmed);
 }
 
 function parseUrl(input: string): BoardRefResult {
@@ -57,13 +58,14 @@ function parseUrl(input: string): BoardRefResult {
     return { ok: false, error: "That URL is not on Pinterest." };
   }
   const segments = url.pathname.split("/").filter((segment) => segment.length > 0);
-  if (segments.length < 2) {
+  const [first, second] = segments;
+  if (!first || !second) {
     return { ok: false, error: "That URL is not a board. Open a board first." };
   }
-  if (RESERVED.has(segments[0].toLowerCase())) {
-    return { ok: false, error: `"${segments[0]}" is not a username, so this is not a board.` };
+  if (RESERVED.has(first.toLowerCase())) {
+    return { ok: false, error: `"${first}" is not a username, so this is not a board.` };
   }
-  return build(segments[0], segments[1], input);
+  return build(first, second, input);
 }
 
 function build(username: string, slug: string, original: string): BoardRefResult {

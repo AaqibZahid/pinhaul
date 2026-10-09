@@ -32,8 +32,9 @@ export function extensionOf(url: string, fallback: string): string {
   }
   const match = /\.([a-z0-9]{2,5})$/i.exec(path);
   if (!match) return fallback;
-  const ext = match[1].toLowerCase();
-  return ALLOWED.has(ext) ? `.${ext}` : fallback;
+  const ext = match[1];
+  if (!ext) return fallback;
+  return ALLOWED.has(ext.toLowerCase()) ? `.${ext.toLowerCase()}` : fallback;
 }
 
 const ALLOWED = new Set([
