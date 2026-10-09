@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "live:discover": "node scripts/live-discover.mjs"
+    "smoke:extension": "npm run build && node scripts/smoke-extension.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.287",

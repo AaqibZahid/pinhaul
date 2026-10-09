@@ -77,7 +77,18 @@ npm test
 npm run test:watch
 npm run build
 npm run package:extension
+npm run smoke:extension
 ```
+
+`smoke:extension` launches Chrome with a throwaway profile and verifies that
+the built service worker loads. Set `PINPULL_CHROME` when Chrome is installed
+outside its standard location. It does not copy cookies or perform account
+actions.
+
+Before tagging a local release, run the commands above and manually verify in
+the normal signed-in Chrome profile: account boards, refresh after a board is
+added or deleted, one private board, one public board by URL and by
+`username/boardname`, sections, default Downloads, Save As, and Stop.
 
 The extension has no runtime server. Pinterest requests use the browser session through the host permissions in `src/manifest.json`; cached board metadata and the Save As preference stay in Chrome extension storage.
 
