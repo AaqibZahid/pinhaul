@@ -1,8 +1,18 @@
-/target
-AGENTS.md
-**/AGENTS.md
-/downloads
-/.state
-/.browser-profile
+/node_modules/
+
+# build output
+/dist/
+
+# scratch
 *.log
 .probe_*
+
+# the earlier CLI's downloads and checkpoints
+/target
+/.state
+/.browser-profile
+
+# agent-only files
+AGENTS.md
+**/AGENTS.md
+.opencode/

@@ -1,0 +1,21 @@
+{
+  "name": "pinpull",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chrome extension that bulk-downloads the images and videos from a Pinterest board.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "live:discover": "node scripts/live-discover.mjs"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}
