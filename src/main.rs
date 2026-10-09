@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
     // A public board Pinterest opens to everyone is read with whatever session
     // the stored profile has, signed in or not; a board that refuses is what
     // makes a sign-in necessary.
-    let session = pinpull::auth::authenticate(args.headless).await?;
+    let session = pinpull::auth::authenticate(args.wants_headless()).await?;
     if session.csrf_token().is_none() {
         eprintln!("pinpull: the session carries no csrftoken cookie; API calls may be rejected");
     }

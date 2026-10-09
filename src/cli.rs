@@ -16,7 +16,7 @@ pub struct Args {
     #[arg(long, short = 'o', default_value = "downloads")]
     pub out: PathBuf,
 
-    /// Run the browser without a visible window (default unless --login is used)
+    /// Run the browser without a visible window (the default; --login opens one)
     #[arg(long, conflicts_with = "login")]
     pub headless: bool,
 
@@ -27,6 +27,18 @@ pub struct Args {
     /// Number of concurrent downloads
     #[arg(long, default_value_t = 4, value_parser = clap::value_parser!(u8).range(1..=64))]
     pub jobs: u8,
+}
+
+impl Args {
+    /// Whether the browser should run without a visible window.
+    ///
+    /// A board is read with whatever session the stored profile already has, so
+    /// a plain run stays silent and a window only appears when one is asked
+    /// for. `--headless` states that silence out loud; it is what happens
+    /// anyway.
+    pub fn wants_headless(&self) -> bool {
+        !self.login
+    }
 }
 
 #[cfg(test)]
@@ -56,7 +68,9 @@ mod tests {
         let args = Args::parse_from(["pinpull", "user/board"]);
         assert_eq!(args.out, PathBuf::from("downloads"));
         assert_eq!(args.jobs, 4);
-        assert!(!args.headless);
+        // A board is read with whatever session the stored profile has, so a
+        // plain run stays silent: the browser only appears for --login.
+        assert!(args.wants_headless());
         assert!(!args.login);
     }
 
@@ -64,6 +78,19 @@ mod tests {
     fn headless_conflicts_with_login() {
         let result = Args::try_parse_from(["pinpull", "user/board", "--headless", "--login"]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn only_login_asks_for_a_window() {
+        let args = Args::try_parse_from(["pinpull", "user/board", "--login"]).unwrap();
+        assert!(!args.wants_headless());
+        assert!(args.login);
+
+        let args = Args::try_parse_from(["pinpull", "user/board"]).unwrap();
+        assert!(args.wants_headless());
+
+        let args = Args::try_parse_from(["pinpull", "user/board", "--headless"]).unwrap();
+        assert!(args.wants_headless());
     }
 
     #[test]
