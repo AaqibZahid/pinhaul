@@ -6,6 +6,9 @@ import { PinterestClient, PinterestError, type PinterestErrorKind } from "./pint
 
 const client = new PinterestClient({ intervalMs: 110 });
 const BOARDS_KEY = "accountBoards";
+const OFFSCREEN_PATH = "offscreen/offscreen.html";
+const blobChannel = new BroadcastChannel("pinpull-blobs");
+let creatingOffscreen: Promise<void> | null = null;
 
 let active: {
   controller: AbortController;
@@ -107,13 +110,13 @@ async function runDownload(ref: BoardRef, saveAs: boolean, controller: AbortCont
         : null;
     }
   } finally {
-    if (active?.controller === controller && active.objectUrl) URL.revokeObjectURL(active.objectUrl);
+    if (active?.controller === controller && active.objectUrl) revokeObjectUrl(active.objectUrl);
     active = null;
   }
 }
 
 async function saveZip(blob: Blob, filename: string, saveAs: boolean): Promise<number> {
-  const objectUrl = URL.createObjectURL(blob);
+  const objectUrl = await createObjectUrl(blob);
   try {
     const id = await chrome.downloads.download({ url: objectUrl, filename, saveAs, conflictAction: "uniquify" });
     if (active) {
@@ -127,9 +130,50 @@ async function saveZip(blob: Blob, filename: string, saveAs: boolean): Promise<n
     }
     return id;
   } catch (error) {
-    URL.revokeObjectURL(objectUrl);
+    revokeObjectUrl(objectUrl);
     throw error;
   }
+}
+
+async function createObjectUrl(blob: Blob): Promise<string> {
+  await ensureOffscreenDocument();
+  const id = crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => finish(new Error("The ZIP download helper did not respond")), 10_000);
+    const listener = (event: MessageEvent) => {
+      const message = event.data as { type?: string; id?: string; url?: string };
+      if (message.type !== "created" || message.id !== id || !message.url) return;
+      finish(undefined, message.url);
+    };
+    const finish = (error?: Error, url?: string) => {
+      clearTimeout(timeout);
+      blobChannel.removeEventListener("message", listener);
+      error ? reject(error) : resolve(url as string);
+    };
+    blobChannel.addEventListener("message", listener);
+    blobChannel.postMessage({ type: "create", id, blob });
+  });
+}
+
+function revokeObjectUrl(url: string): void {
+  blobChannel.postMessage({ type: "revoke", url });
+}
+
+async function ensureOffscreenDocument(): Promise<void> {
+  const url = chrome.runtime.getURL(OFFSCREEN_PATH);
+  const contexts = await chrome.runtime.getContexts({
+    contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
+    documentUrls: [url],
+  });
+  if (contexts.length > 0) return;
+  creatingOffscreen ??= chrome.offscreen.createDocument({
+    url: OFFSCREEN_PATH,
+    reasons: [chrome.offscreen.Reason.BLOBS],
+    justification: "Create a temporary object URL for the completed board ZIP.",
+  }).finally(() => {
+    creatingOffscreen = null;
+  });
+  await creatingOffscreen;
 }
 
 async function cancelDownload(): Promise<void> {

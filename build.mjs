@@ -26,6 +26,7 @@ await rm(out, { recursive: true, force: true });
 await mkdir(path.join(out, "popup"), { recursive: true });
 await mkdir(path.join(out, "background"), { recursive: true });
 await mkdir(path.join(out, "icons"), { recursive: true });
+await mkdir(path.join(out, "offscreen"), { recursive: true });
 
 if (watch) {
   const ctx = await context({
@@ -43,6 +44,13 @@ if (watch) {
     format: "esm",
   });
   await swCtx.watch();
+  const offscreenCtx = await context({
+    ...shared,
+    entryPoints: [path.join(root, "src/offscreen/offscreen.ts")],
+    outfile: path.join(out, "offscreen/offscreen.js"),
+    format: "iife",
+  });
+  await offscreenCtx.watch();
   console.log("watching for changes");
 } else {
   await build({
@@ -58,7 +66,13 @@ if (watch) {
     outfile: path.join(out, "background/service-worker.js"),
     format: "esm",
   });
-  for (const file of ["manifest.json", "popup/popup.html", "popup/popup.css", "icons/16.png", "icons/32.png", "icons/48.png", "icons/128.png"]) {
+  await build({
+    ...shared,
+    entryPoints: [path.join(root, "src/offscreen/offscreen.ts")],
+    outfile: path.join(out, "offscreen/offscreen.js"),
+    format: "iife",
+  });
+  for (const file of ["manifest.json", "popup/popup.html", "popup/popup.css", "offscreen/offscreen.html", "icons/16.png", "icons/32.png", "icons/48.png", "icons/128.png"]) {
     const from = path.join(root, "src", file);
     if (!existsSync(from)) continue;
     await mkdir(path.dirname(path.join(out, file)), { recursive: true });

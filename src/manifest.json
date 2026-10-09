@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Bulk-download the images and videos from a Pinterest board into an organized folder.",
   "minimum_chrome_version": "116",
-  "permissions": ["downloads", "storage"],
+  "permissions": ["downloads", "offscreen", "storage"],
   "host_permissions": [
     "*://pinterest.com/*",
     "*://*.pinterest.com/*",
