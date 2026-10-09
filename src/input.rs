@@ -113,6 +113,13 @@ fn validate_segment(seg: &str, what: &str, original: &str) -> Result<()> {
             "invalid {what} {seg:?} in {original:?}"
         )));
     }
+    // Either separator would let the name climb out of the output directory,
+    // where the media for one board must stay.
+    if seg.chars().any(|c| matches!(c, '/' | '\\')) {
+        return Err(PinpullError::InvalidBoard(format!(
+            "{what} contains a path separator in {original:?}"
+        )));
+    }
     if seg.chars().any(|c| c.is_whitespace()) {
         return Err(PinpullError::InvalidBoard(format!(
             "{what} contains whitespace in {original:?}"
@@ -221,5 +228,18 @@ mod tests {
             .parse::<BoardRef>()
             .unwrap_err();
         assert!(matches!(err, PinpullError::NotABoard(_)));
+    }
+
+    #[test]
+    fn rejects_a_separator_inside_a_segment() {
+        // `..` on its own is already refused, but a separator carries the
+        // climb out of the output directory on its own.
+        for argument in ["user/..\\..\\elsewhere", "user/board\\..\\..\\x"] {
+            let err = argument.parse::<BoardRef>().unwrap_err();
+            assert!(
+                matches!(err, PinpullError::InvalidBoard(_)),
+                "{argument} was accepted"
+            );
+        }
     }
 }
