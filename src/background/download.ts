@@ -80,7 +80,11 @@ export async function downloadBoard(
   await deps.wait(downloadId, signal);
 
   progress.phase = "done";
-  progress.detail = `${progress.files} files saved`;
+  progress.detail = [
+    `${progress.files} files saved`,
+    progress.skipped ? `${progress.skipped} without media` : "",
+    progress.failed ? `${progress.failed} failed` : "",
+  ].filter(Boolean).join(" · ");
   report(progress, onProgress);
   return progress;
 }
