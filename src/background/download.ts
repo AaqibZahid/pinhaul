@@ -1,7 +1,7 @@
 import type { BoardRef } from "../shared/types";
 import type { BoardSummary, DownloadProgress, MediaItem } from "../shared/types";
 import { boardFolderName, extensionOf, fileStems } from "../shared/filenames";
-import { eligibilityOf, mediaItemsOf } from "../shared/pins";
+import { mediaItemsOf } from "../shared/pins";
 import { assembleHlsVideo } from "./video-hls";
 import { BoardCrawler, loadSections, resolveBoard } from "./discovery";
 import type { PinterestGateway } from "./pinterest";
@@ -95,13 +95,6 @@ async function addPin(
 ): Promise<void> {
   try {
     const detail = await deps.client.getData("PinResource", { id: pinId, field_set_key: "detailed" }, `/pin/${pinId}/`);
-    const eligibility = eligibilityOf(detail);
-    if (eligibility === "ineligible") {
-      progress.skipped += 1;
-      return;
-    }
-    if (eligibility !== "eligible") throw new Error("Pinterest did not confirm that this pin may be downloaded");
-
     const items = mediaItemsOf(detail);
     if (items.length === 0) {
       progress.skipped += 1;

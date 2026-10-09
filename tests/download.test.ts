@@ -83,8 +83,8 @@ describe("downloadBoard", () => {
       expect(result.phase).toBe("done");
       expect(result.discovered).toBe(5);
       expect(result.processed).toBe(5);
-      expect(result.files).toBe(4);
-      expect(result.skipped).toBe(1);
+      expect(result.files).toBe(5);
+      expect(result.skipped).toBe(0);
       expect(saved).toBeDefined();
       const names = zipNames(await saved!.arrayBuffer());
       expect(names).toEqual([
@@ -92,6 +92,7 @@ describe("downloadBoard", () => {
         "Trip Ideas/Bad Section/image-section.jpg",
         "Trip Ideas/direct-video.mp4",
         "Trip Ideas/Bad Section/hls-video.mp4",
+        "Trip Ideas/skip-me.jpg",
       ]);
       expect(new Uint8Array(await saved!.arrayBuffer()).at(-22)).toBe(0x50);
     } finally {

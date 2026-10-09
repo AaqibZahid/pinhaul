@@ -1,8 +1,5 @@
 // Types shared between the popup, the service worker and the tests.
 
-/** Whether Pinterest lets the current user download a pin. */
-export type Eligibility = "eligible" | "ineligible" | "unknown";
-
 /** A Pinterest board, named the way the URL names it. */
 export interface BoardRef {
   username: string;

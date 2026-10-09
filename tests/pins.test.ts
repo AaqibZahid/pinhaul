@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import feedPage from "./fixtures/feed-page.json" with { type: "json" };
 import videoPin from "./fixtures/video-pin.json" with { type: "json" };
 import pinDetail from "./fixtures/pin-detail.json" with { type: "json" };
-import { eligibilityOf, isPinItem, mediaItemsOf, nextBookmark, pinIdOf } from "../src/shared/pins";
+import { isPinItem, mediaItemsOf, nextBookmark, pinIdOf } from "../src/shared/pins";
 
 function urls(items: ReturnType<typeof mediaItemsOf>): string[] {
   return items.map((item) => item.url);
@@ -40,25 +40,6 @@ describe("isPinItem", () => {
     expect(isPinItem({ id: "1", type: "pin" })).toBe(true);
     expect(isPinItem({ id: "1", images: {} })).toBe(true);
     expect(isPinItem({ id: "1" })).toBe(false);
-  });
-});
-
-describe("eligibilityOf", () => {
-  it("has three states", () => {
-    expect(eligibilityOf({ is_eligible_for_image_download: true })).toBe("eligible");
-    expect(eligibilityOf({ is_eligible_for_image_download: false })).toBe("ineligible");
-    expect(eligibilityOf({})).toBe("unknown");
-    expect(eligibilityOf({ is_eligible_for_image_download: "true" })).toBe("unknown");
-  });
-
-  it("reads the camelCase a pin page reports", () => {
-    expect(eligibilityOf({ isEligibleForImageDownload: true })).toBe("eligible");
-    expect(eligibilityOf({ isEligibleForImageDownload: false })).toBe("ineligible");
-    expect(eligibilityOf({ isEligibleForImageDownload: null })).toBe("unknown");
-  });
-
-  it("reads the live fixture", () => {
-    expect(eligibilityOf(pinDetail)).toBe("eligible");
   });
 });
 

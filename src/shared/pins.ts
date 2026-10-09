@@ -5,7 +5,7 @@
 // camelCase. Both show up in practice, so everything here matches on the raw
 // JSON rather than on one struct.
 
-import type { Eligibility, MediaItem, MediaKind } from "./types";
+import type { MediaItem, MediaKind } from "./types";
 
 /** Which pin a record is about, whichever way it names itself.
  *
@@ -48,23 +48,7 @@ export function isPinItem(item: unknown): boolean {
   return false;
 }
 
-/** Whether Pinterest lets the current user download this pin.
- *
- * `true` downloads, `false` is skipped with a reason, and anything else is
- * reported as unverified rather than being silently treated either way. */
-export function eligibilityOf(item: unknown): Eligibility {
-  if (!item || typeof item !== "object") return "unknown";
-  const record = item as Record<string, unknown>;
-  for (const key of ["is_eligible_for_image_download", "isEligibleForImageDownload"]) {
-    const value = record[key];
-    if (value === true) return "eligible";
-    if (value === false) return "ineligible";
-  }
-  return "unknown";
-}
-
-/** The files a pin contributes, in the order they are written. Ineligible pins
- * never reach this; the caller gates them. */
+/** The files a pin contributes, in the order they are written. */
 export function mediaItemsOf(pin: unknown): MediaItem[] {
   if (!pin || typeof pin !== "object") return [];
   const record = pin as Record<string, unknown>;
