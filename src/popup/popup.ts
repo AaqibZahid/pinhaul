@@ -1,6 +1,7 @@
 import { parseBoardRef } from "../shared/boardref";
 import type { Request } from "../shared/messages";
-import type { BoardRef, BoardSummary, DownloadProgress } from "../shared/types";
+import type { BoardRef, BoardSummary, BoardSyncResult, DownloadProgress } from "../shared/types";
+import type { PinterestErrorKind } from "../background/pinterest";
 
 const refreshButton = byId<HTMLButtonElement>("refresh");
 const connectButton = byId<HTMLButtonElement>("connect");
@@ -22,6 +23,7 @@ interface Reply<T = unknown> {
   ok: boolean;
   value?: T;
   error?: string;
+  kind?: PinterestErrorKind;
 }
 
 let boards: BoardSummary[] = [];
@@ -48,17 +50,18 @@ async function sync(): Promise<void> {
   syncing = true;
   refreshButton.classList.add("spinning");
   setMessage("");
-  const reply = await send<BoardSummary[]>({ type: "syncBoards" });
+  const reply = await send<BoardSyncResult>({ type: "syncBoards" });
   syncing = false;
   refreshButton.classList.remove("spinning");
   if (!reply.ok) {
-    accountLabel.textContent = "Pinterest connection needed";
+    accountLabel.textContent = reply.kind === "unauthorized" ? "Pinterest sign-in needed" : "Pinterest unavailable";
     renderBoards([]);
-    setMessage(reply.error ?? "Sign in to Pinterest, then refresh.", true);
+    setMessage(reply.kind === "unauthorized" ? "Sign in to Pinterest, then refresh." : "Pinterest is temporarily unavailable. Try again shortly.", true);
     return;
   }
-  boards = reply.value ?? [];
+  boards = reply.value?.boards ?? [];
   accountLabel.textContent = boards.length ? `${boards.length} board${boards.length === 1 ? "" : "s"}` : "Your boards";
+  setMessage(reply.value?.stale ? "Showing cached boards while Pinterest is unavailable." : "");
   renderBoards(boards);
 }
 

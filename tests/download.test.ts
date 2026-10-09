@@ -1,5 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import { downloadBoard } from "../src/background/download";
+import type { PinterestGateway, ResourceEnvelope } from "../src/background/pinterest";
+
+const fixture = JSON.parse(readFileSync(new URL("./fixtures/small-board.json", import.meta.url), "utf8")) as {
+  board: Record<string, unknown>;
+  sections: unknown[];
+  feed: unknown[];
+  sectionPins: unknown[];
+  pins: Record<string, unknown>;
+};
+const tsBytes = new Uint8Array(readFileSync(new URL("./fixtures/hls-ts.bin", import.meta.url)));
 
 describe("downloadBoard", () => {
   it("does not create a file when cancelled before work starts", async () => {
@@ -27,4 +38,80 @@ describe("downloadBoard", () => {
     ).rejects.toMatchObject({ name: "AbortError" });
     expect(saved).toBe(false);
   });
+
+  it("builds one section-aware ZIP from a realistic mixed board", async () => {
+    let saved: Blob | undefined;
+    const client: PinterestGateway = {
+      async getData<T>(resource: string, options: Record<string, unknown>): Promise<T> {
+        if (resource === "BoardResource") return fixture.board as T;
+        if (resource === "PinResource") return fixture.pins[String(options.id)] as T;
+        throw new Error(`unexpected data resource ${resource}`);
+      },
+      async getResource(resource: string): Promise<ResourceEnvelope> {
+        if (resource === "BoardSectionsResource") return { resource_response: { data: fixture.sections } };
+        if (resource === "BoardFeedResource") return { resource_response: { data: fixture.feed } };
+        if (resource === "BoardSectionPinsResource") return { resource_response: { data: fixture.sectionPins } };
+        throw new Error(`unexpected resource ${resource}`);
+      },
+    };
+
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("index.m3u8")) {
+        return new Response("#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:1.92,\nclip.ts\n#EXT-X-ENDLIST\n");
+      }
+      if (url.endsWith("clip.ts")) return new Response(tsBytes);
+      return new Response(new TextEncoder().encode(url.endsWith("direct.mp4") ? "mp4" : "image"));
+    });
+    try {
+      const result = await downloadBoard(
+        { username: "alice", slug: "trip-ideas" },
+        false,
+        {
+          client,
+          save: async (blob) => {
+            saved = blob;
+            return 1;
+          },
+          wait: async () => undefined,
+        },
+        () => undefined,
+        new AbortController().signal,
+      );
+
+      expect(result.phase).toBe("done");
+      expect(result.discovered).toBe(5);
+      expect(result.processed).toBe(5);
+      expect(result.files).toBe(4);
+      expect(result.skipped).toBe(1);
+      expect(saved).toBeDefined();
+      const names = zipNames(await saved!.arrayBuffer());
+      expect(names).toEqual([
+        "Trip Ideas/image-root.jpg",
+        "Trip Ideas/Bad Section/image-section.jpg",
+        "Trip Ideas/direct-video.mp4",
+        "Trip Ideas/Bad Section/hls-video.mp4",
+      ]);
+      expect(new Uint8Array(await saved!.arrayBuffer()).at(-22)).toBe(0x50);
+    } finally {
+      vi.stubGlobal("fetch", originalFetch);
+    }
+  });
 });
+
+function zipNames(buffer: ArrayBuffer): string[] {
+  const bytes = new Uint8Array(buffer);
+  const view = new DataView(buffer);
+  const names: string[] = [];
+  for (let offset = 0; offset + 46 <= bytes.length;) {
+    if (view.getUint32(offset, true) !== 0x02014b50) {
+      offset += 1;
+      continue;
+    }
+    const nameLength = view.getUint16(offset + 28, true);
+    names.push(new TextDecoder().decode(bytes.slice(offset + 46, offset + 46 + nameLength)));
+    offset += 46 + nameLength + view.getUint16(offset + 30, true) + view.getUint16(offset + 32, true);
+  }
+  return names;
+}

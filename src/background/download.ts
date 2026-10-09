@@ -9,7 +9,7 @@ import { ZipWriter } from "./zip";
 
 export interface DownloadDeps {
   client: PinterestGateway;
-  save: (url: string, filename: string, saveAs: boolean) => Promise<number>;
+  save: (blob: Blob, filename: string, saveAs: boolean) => Promise<number>;
   wait: (downloadId: number, signal: AbortSignal) => Promise<void>;
 }
 
@@ -76,13 +76,8 @@ export async function downloadBoard(
   progress.phase = "saving";
   progress.detail = "Saving ZIP file";
   report(progress, onProgress);
-  const objectUrl = URL.createObjectURL(blob);
-  try {
-    const downloadId = await deps.save(objectUrl, `${boardFolderName(progress.board?.name ?? ref.slug, ref.slug)}.zip`, saveAs);
-    await deps.wait(downloadId, signal);
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
+  const downloadId = await deps.save(blob, `${boardFolderName(progress.board?.name ?? ref.slug, ref.slug)}.zip`, saveAs);
+  await deps.wait(downloadId, signal);
 
   progress.phase = "done";
   progress.detail = `${progress.files} files saved`;

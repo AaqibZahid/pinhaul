@@ -1,8 +1,8 @@
 import type { Request } from "../shared/messages";
-import type { BoardRef, BoardSummary, DownloadProgress } from "../shared/types";
+import type { BoardRef, BoardSummary, BoardSyncResult, DownloadProgress } from "../shared/types";
 import { listAccountBoards } from "./account";
 import { downloadBoard } from "./download";
-import { PinterestClient } from "./pinterest";
+import { PinterestClient, PinterestError, type PinterestErrorKind } from "./pinterest";
 
 const client = new PinterestClient({ intervalMs: 110 });
 const BOARDS_KEY = "accountBoards";
@@ -11,12 +11,13 @@ let active: {
   controller: AbortController;
   progress: DownloadProgress;
   downloadId?: number;
+  objectUrl?: string;
   promise: Promise<void>;
 } | null = null;
 let lastProgress: DownloadProgress | null = null;
 
 chrome.runtime.onMessage.addListener((message: Request, _sender, respond) => {
-  handle(message).then(respond, (error: unknown) => respond({ ok: false, error: messageOf(error) }));
+  handle(message).then(respond, (error: unknown) => respond({ ok: false, error: messageOf(error), kind: errorKind(error) }));
   return true;
 });
 
@@ -43,15 +44,16 @@ async function handle(message: Request): Promise<unknown> {
   }
 }
 
-async function syncBoards(): Promise<BoardSummary[]> {
+async function syncBoards(): Promise<BoardSyncResult> {
   try {
     const boards = await listAccountBoards(client);
     await chrome.storage.local.set({ [BOARDS_KEY]: boards });
-    return boards;
+    return { boards, stale: false };
   } catch (error) {
+    if (error instanceof PinterestError && !isCacheableFailure(error.kind)) throw error;
     const cached = await chrome.storage.local.get(BOARDS_KEY);
     const boards = cached[BOARDS_KEY] as BoardSummary[] | undefined;
-    if (boards?.length) return boards;
+    if (boards?.length) return { boards, stale: true };
     throw error;
   }
 }
@@ -86,7 +88,7 @@ async function runDownload(ref: BoardRef, saveAs: boolean, controller: AbortCont
       saveAs,
       {
         client,
-        save: (url, filename, ask) => saveZip(url, filename, ask),
+        save: (blob, filename, ask) => saveZip(blob, filename, ask),
         wait: waitForDownload,
       },
       (progress) => {
@@ -105,14 +107,24 @@ async function runDownload(ref: BoardRef, saveAs: boolean, controller: AbortCont
         : null;
     }
   } finally {
+    if (active?.controller === controller && active.objectUrl) URL.revokeObjectURL(active.objectUrl);
     active = null;
   }
 }
 
-async function saveZip(url: string, filename: string, saveAs: boolean): Promise<number> {
-  const id = await chrome.downloads.download({ url, filename, saveAs, conflictAction: "uniquify" });
-  if (active) active.downloadId = id;
-  return id;
+async function saveZip(blob: Blob, filename: string, saveAs: boolean): Promise<number> {
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const id = await chrome.downloads.download({ url: objectUrl, filename, saveAs, conflictAction: "uniquify" });
+    if (active) {
+      active.downloadId = id;
+      active.objectUrl = objectUrl;
+    }
+    return id;
+  } catch (error) {
+    URL.revokeObjectURL(objectUrl);
+    throw error;
+  }
 }
 
 async function cancelDownload(): Promise<void> {
@@ -154,5 +166,13 @@ function isAbort(error: unknown): boolean {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function errorKind(error: unknown): PinterestErrorKind | undefined {
+  return error instanceof PinterestError ? error.kind : undefined;
+}
+
+function isCacheableFailure(kind: PinterestErrorKind): boolean {
+  return kind === "rate-limited" || kind === "server" || kind === "transport";
 }
 

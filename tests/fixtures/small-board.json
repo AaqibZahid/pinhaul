@@ -1,0 +1,31 @@
+{
+  "board": {
+    "id": "board-1",
+    "name": "Trip / Ideas",
+    "url": "https://www.pinterest.com/alice/trip-ideas/",
+    "pin_count": 5,
+    "section_count": 1
+  },
+  "sections": [
+    { "id": "section-1", "name": "Bad:/Section" }
+  ],
+  "feed": [
+    { "id": "image-root", "type": "pin", "images": { "orig": { "url": "https://i.pinimg.com/originals/root.jpg" } } },
+    { "id": "image-section", "type": "pin", "images": { "orig": { "url": "https://i.pinimg.com/originals/section.jpg" } } },
+    { "id": "direct-video", "type": "pin", "videos": { "video_list": { "mp4": { "url": "https://v1.pinimg.com/direct.mp4", "width": 720, "height": 720 } } } },
+    { "id": "hls-video", "type": "pin", "videos": { "video_list": { "hls": { "url": "https://v1.pinimg.com/hls/index.m3u8", "width": 720, "height": 720 } } } },
+    { "id": "skip-me", "type": "pin", "images": { "orig": { "url": "https://i.pinimg.com/originals/skip.jpg" } } },
+    { "id": "related", "type": "story", "story_type": "related_interests_module" }
+  ],
+  "sectionPins": [
+    { "id": "image-section", "type": "pin" },
+    { "id": "hls-video", "type": "pin" }
+  ],
+  "pins": {
+    "image-root": { "id": "image-root", "is_eligible_for_image_download": true, "images": { "orig": { "url": "https://i.pinimg.com/originals/root.jpg" } } },
+    "image-section": { "id": "image-section", "is_eligible_for_image_download": true, "images": { "orig": { "url": "https://i.pinimg.com/originals/section.jpg" } } },
+    "direct-video": { "id": "direct-video", "is_eligible_for_image_download": true, "videos": { "video_list": { "mp4": { "url": "https://v1.pinimg.com/direct.mp4", "width": 720, "height": 720 } } } },
+    "hls-video": { "id": "hls-video", "is_eligible_for_image_download": true, "videos": { "video_list": { "hls": { "url": "https://v1.pinimg.com/hls/index.m3u8", "width": 720, "height": 720 } } } },
+    "skip-me": { "id": "skip-me", "is_eligible_for_image_download": false, "images": { "orig": { "url": "https://i.pinimg.com/originals/skip.jpg" } } }
+  }
+}
