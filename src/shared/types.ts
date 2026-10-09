@@ -94,7 +94,7 @@ export interface Job {
 }
 
 export interface FileRecord {
-  downloadId: string;
+  downloadId: number;
   pinId: string;
   filename: string;
   state: "in_progress" | "complete" | "interrupted";

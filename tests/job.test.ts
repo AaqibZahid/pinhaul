@@ -135,18 +135,18 @@ class FakeStore implements JobStore {
 
 class FakeDownloader implements Downloader {
   started: DownloadRequest[] = [];
-  pending: string[] = [];
+  pending: number[] = [];
   private counter = 0;
 
-  async start(request: DownloadRequest): Promise<string> {
+  async start(request: DownloadRequest): Promise<number> {
     this.started.push(request);
     this.counter += 1;
-    const id = `download-${this.counter}`;
+    const id = this.counter;
     this.pending.push(id);
     return id;
   }
 
-  async find(ids: string[]): Promise<DownloadItem[]> {
+  async find(ids: number[]): Promise<DownloadItem[]> {
     return ids.map((id) => ({ id, state: this.pending.includes(id) ? "in_progress" : "complete" }));
   }
 

@@ -36,7 +36,7 @@ export class JobRunner {
   private crawler: BoardCrawler | null = null;
   private readonly seen = new Set<string>();
   private readonly inflight = new Map<string, Promise<void>>();
-  private readonly waiters = new Map<string, (outcome: Outcome) => void>();
+  private readonly waiters = new Map<number, (outcome: Outcome) => void>();
   private readonly blobs = new Set<string>();
   private readonly held = new Set<string>();
   private running = false;
@@ -124,7 +124,7 @@ export class JobRunner {
   }
 
   /** Reports a Chrome download changing state, so whoever waited for it wakes. */
-  reportDownloadChange(downloadId: string, state: string, error?: string): void {
+  reportDownloadChange(downloadId: number, state: string, error?: string): void {
     const waiter = this.waiters.get(downloadId);
     if (!waiter) return;
     this.waiters.delete(downloadId);
@@ -354,7 +354,7 @@ export class JobRunner {
   }
 
   /** Waits for the download event that says a file really finished. */
-  private waitForDownload(downloadId: string): Promise<Outcome> {
+  private waitForDownload(downloadId: number): Promise<Outcome> {
     return new Promise((resolve) => {
       this.waiters.set(downloadId, resolve);
     });

@@ -12,16 +12,16 @@ export interface DownloadRequest {
 }
 
 export interface DownloadItem {
-  id: string;
+  id: number;
   state: "in_progress" | "complete" | "interrupted";
   error?: string;
 }
 
 export interface Downloader {
   /** Starts a download and returns Chrome's id for it. */
-  start(request: DownloadRequest): Promise<string>;
+  start(request: DownloadRequest): Promise<number>;
   /** Looks download ids up, so a restarted job can reconcile them. */
-  find(ids: string[]): Promise<DownloadItem[]>;
+  find(ids: number[]): Promise<DownloadItem[]>;
   /** Opens the folder the downloads are stored in, where Chrome allows it. */
   reveal(): void;
 }

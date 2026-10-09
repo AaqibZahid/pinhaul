@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Pinpull</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main id="app">
+      <header>
+        <h1>Pinpull</h1>
+        <p id="board" class="board">Looking for a board…</p>
+      </header>
+
+      <form id="board-form" autocomplete="off">
+        <label for="board-input">Board</label>
+        <div class="row">
+          <input
+            id="board-input"
+            name="board"
+            type="text"
+            placeholder="username/boardname or a board URL"
+            spellcheck="false"
+          />
+          <button id="download" type="submit">Download board</button>
+        </div>
+      </form>
+
+      <section id="progress" class="progress hidden">
+        <div class="row">
+          <span id="phase" class="phase">…</span>
+          <span id="detail" class="detail"></span>
+        </div>
+        <div class="bar"><div id="bar-fill" class="bar-fill"></div></div>
+        <dl id="counts" class="counts">
+          <div><dt>Found</dt><dd id="found">0</dd></div>
+          <div><dt>Downloaded</dt><dd id="downloaded">0</dd></div>
+          <div><dt>Skipped</dt><dd id="skipped">0</dd></div>
+          <div><dt>Failed</dt><dd id="failed">0</dd></div>
+        </dl>
+      </section>
+
+      <p id="message" class="message hidden"></p>
+
+      <section id="actions" class="actions hidden">
+        <button id="pause" type="button">Pause</button>
+        <button id="retry" type="button">Retry failed</button>
+        <button id="folder" type="button">Open downloads folder</button>
+      </section>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
