@@ -39,7 +39,7 @@ function pin(id: string) {
 }
 
 function feedPage(ids: string[], bookmark: string | null) {
-  const data = ids.map((id) => pin(id));
+  const data: unknown[] = ids.map((id) => pin(id));
   // A board feed ends with a module that is not a pin.
   data.push({ id: "GtSJzuRT", story_type: "related_interests_module", type: "story" });
   return { resource_response: { status: "success", data, bookmark } };
@@ -49,7 +49,7 @@ describe("resourceUrl", () => {
   it("builds the URL the web app uses", () => {
     const url = resourceUrl("BoardResource", { slug: "b", username: "u" }, "/u/b/");
     expect(url).toContain("https://www.pinterest.com/resource/BoardResource/get/?data=");
-    const data = decodeURIComponent(url.split("data=")[1].split("&")[0]);
+    const data = decodeURIComponent(url.split("data=")[1]?.split("&")[0] ?? "");
     expect(JSON.parse(data)).toEqual({ options: { slug: "b", username: "u" } });
     expect(url).toContain("source_url=%2Fu%2Fb%2F");
   });

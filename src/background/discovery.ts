@@ -60,7 +60,8 @@ export async function loadSections(client: PinterestClient, boardId: string): Pr
     const envelope = await client.getResource("BoardSectionsResource", options, "/");
     const items = itemsOf(envelope);
     if (items.length === 0) break;
-    for (const item of items) {
+    for (const raw of items) {
+      const item = (raw ?? {}) as Record<string, unknown>;
       const id = text(item.id);
       if (!id) continue;
       sections.push({ id, name: text(item.name) ?? text(item.slug) ?? id });
