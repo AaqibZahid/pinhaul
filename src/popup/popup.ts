@@ -43,11 +43,11 @@ function send<T>(request: Request): Promise<Reply<T>> {
   return chrome.runtime.sendMessage(request) as Promise<Reply<T>>;
 }
 
-function setMessage(text: string, error = false): void {
+function setMessage(text: string, error = false, showConnect = false): void {
   message.textContent = text;
   message.classList.toggle("hidden", !text);
   message.classList.toggle("error", error);
-  connectButton.classList.toggle("hidden", !error);
+  connectButton.classList.toggle("hidden", !showConnect);
 }
 
 async function sync(): Promise<void> {
@@ -61,7 +61,11 @@ async function sync(): Promise<void> {
   if (!reply.ok) {
     accountLabel.textContent = reply.kind === "unauthorized" ? "Pinterest sign-in needed" : "Pinterest unavailable";
     renderBoards([]);
-    setMessage(reply.kind === "unauthorized" ? "Sign in to Pinterest, then refresh." : "Pinterest is temporarily unavailable. Try again shortly.", true);
+    setMessage(
+      reply.kind === "unauthorized" ? "Sign in to Pinterest, then refresh." : "Pinterest is temporarily unavailable. Try again shortly.",
+      true,
+      reply.kind === "unauthorized",
+    );
     return;
   }
   boards = reply.value?.boards ?? [];
