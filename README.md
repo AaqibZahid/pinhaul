@@ -107,10 +107,24 @@ failed, and the file names it produced. Delete it to force a full re-scan.
 
 ## Known limitations
 
-- **Not yet validated against**: sections, boards large enough to need several
-  feed pages, videos (direct MP4 or HLS), AES-128 encrypted HLS, private
-  accessible boards, and private inaccessible boards. Those paths are covered by
-  tests against a fixture server but not yet against live Pinterest.
+- **Rate limiting**: on a very large board Pinterest refuses a small share of
+  pin pages with 429s no matter how long the request interval is stretched.
+  Requests are already spaced out by 120 ms, which took a 4,000-pin public
+  board from failing on three quarters of its pins to failing on about 8%.
+  Those pins are recorded as failed with the reason Pinterest gave, and
+  re-running resumes only what is missing.
+- **Discovery is not reproducible**: Pinterest does not promise a stable feed
+  order, so a re-run can surface pins the previous run never saw. Accounting
+  is verified per run — pins discovered in that run = downloaded + skipped +
+  failed — and not across runs.
+- **Not validated against live private boards**, accessible or inaccessible.
+  Both paths are covered by tests against a fixture server, and the visible
+  behaviour (a clear 403 disambiguated by whether the session is signed in)
+  is believed, but a live check needs a private board you own; run it with
+  `--login` to confirm on your own account.
+- **AES-128 encrypted HLS** is implemented and tested against fixtures but has
+  not been seen on live media, so it is unproven against Pinterest's actual
+  key handling.
 - Tall 9:16 story pins expose a creator-facing "Video downloads" toggle that has
   no separate field in Pinterest's API. Pinpull assumes the same
   `is_eligible_for_image_download` flag governs video as well; if Pinterest ever
@@ -123,20 +137,32 @@ failed, and the file names it produced. Delete it to force a full re-scan.
 
 ## Testing status
 
-145 automated tests pass: unit tests for the pure logic, and integration tests
+144 automated tests pass: unit tests for the pure logic, and integration tests
 that drive discovery, pagination, sections, duplicate pins, downloads, HLS
 joining and decryption, range resume, retry behaviour and checkpoint recovery
 against a fixture server that answers canned responses. No credentials and no
 network are needed for them.
 
-Validated against live Pinterest on one public board:
+Against that fixture the full matrix is covered: unit tests for extension,
+dedup, selection, resume, IV, decrypt and payload logic; integration tests for
+the pipeline; sections; a board large enough to need several feed pages; mixed
+media; eligibility true, false and unknown; private boards reachable and
+unreachable by the session; persistent auth; interruption and resume; repeated
+runs; direct MP4; TS-container HLS; fMP4-container HLS; and AES-128 HLS.
 
-- 45 pins discovered against Pinterest's own reported count of 45.
-- 45 downloaded, 0 skipped, 0 failed.
-- A second run downloaded nothing and preserved the accounting.
+Validated against live Pinterest on two public boards:
 
-Not yet validated against live Pinterest: the media types and board shapes
-listed under known limitations above.
+- A 45-pin board: 45 discovered against Pinterest's own reported count of 45,
+  45 downloaded, 0 skipped, 0 failed. A second run downloaded nothing and
+  preserved the accounting.
+- A board Pinterest declares as 4,133 pins across 81 sections: 4,263 pins
+  discovered (Pinterest serves more than it advertises), 3,693 downloaded,
+  222 skipped as not eligible, 348 failed on rate limiting. Every run
+  satisfied the accounting invariant. Sections, pagination, direct-MP4 videos
+  and MPEG-TS HLS playlists were all exercised against the live site.
+
+Not validated against live Pinterest: private boards (needs `--login` on a
+board you own) and AES-128 encrypted HLS, which live media did not present.
 
 
 ## Development
