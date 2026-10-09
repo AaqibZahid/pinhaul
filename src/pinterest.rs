@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -24,7 +24,14 @@ struct Inner {
     base: String,
     csrf: Mutex<String>,
     cookies: Mutex<String>,
+    /// Keeps requests spaced apart. A board of thousands of pins would otherwise
+    /// be throttled into failing most of its pin pages.
+    next_slot: Mutex<Instant>,
 }
+
+/// The minimum gap between two requests. Large enough to stay under Pinterest's
+/// limit, small enough that a 4,000-pin board still finishes.
+const REQUEST_INTERVAL: Duration = Duration::from_millis(120);
 
 impl PinterestClient {
     pub fn new() -> Result<Self> {
@@ -48,8 +55,26 @@ impl PinterestClient {
                 base: base.trim_end_matches('/').to_owned(),
                 csrf: Mutex::new(csrf_token()),
                 cookies: Mutex::new(String::new()),
+                next_slot: Mutex::new(Instant::now()),
             }),
         })
+    }
+
+    /// Waits until this request's turn comes and reserves the following slot, so
+    /// requests stay spaced out however many pins a board has.
+    async fn pace(&self) {
+        let at = {
+            let mut next = self.inner.next_slot.lock().unwrap();
+            let now = Instant::now();
+            // A late hand-back still keeps the gap from the previous request.
+            let at = (*next).max(now);
+            *next = at + REQUEST_INTERVAL;
+            at
+        };
+        let wait = at.saturating_duration_since(Instant::now());
+        if !wait.is_zero() {
+            tokio::time::sleep(wait).await;
+        }
     }
 
     /// Installs a signed-in Pinterest session as a `Cookie` header value and
@@ -195,6 +220,7 @@ impl PinterestClient {
         let mut attempt = 0u32;
         loop {
             attempt += 1;
+            self.pace().await;
             match self.try_once(url, referer).await {
                 Outcome::Body(body) => return Ok(body),
                 Outcome::RateLimited(retry_after) => {
