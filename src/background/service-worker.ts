@@ -119,6 +119,11 @@ async function saveZip(blob: Blob, filename: string, saveAs: boolean): Promise<n
     if (active) {
       active.downloadId = id;
       active.objectUrl = objectUrl;
+      if (active.controller.signal.aborted) {
+        await chrome.downloads.cancel(id).catch(() => undefined);
+        await chrome.downloads.removeFile(id).catch(() => undefined);
+        throw new DOMException("Download cancelled", "AbortError");
+      }
     }
     return id;
   } catch (error) {
@@ -154,6 +159,10 @@ function waitForDownload(id: number, signal: AbortSignal): Promise<void> {
       if (delta.state.current === "interrupted") finish(new Error(delta.error?.current ?? "Chrome interrupted the ZIP download"));
     };
     const aborted = () => finish(new DOMException("Download cancelled", "AbortError"));
+    if (signal.aborted) {
+      aborted();
+      return;
+    }
     chrome.downloads.onChanged.addListener(listener);
     signal.addEventListener("abort", aborted, { once: true });
     void check();
