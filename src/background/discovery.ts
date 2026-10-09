@@ -9,8 +9,7 @@
 
 import type { BoardInfo, BoardRef, DiscoveryStream } from "../shared/types";
 import { isPinItem, pinIdOf } from "../shared/pins";
-import type { PinterestGateway } from "./ports";
-import { PinterestError } from "./pinterest";
+import { PinterestError, type PinterestGateway } from "./pinterest";
 
 
 export interface ResolvedBoard {
@@ -90,7 +89,7 @@ export class BoardCrawler {
   static start(boardId: string, sections: Section[]): DiscoveryStream[] {
     const streams: DiscoveryStream[] = [{ kind: "feed", id: boardId, bookmark: null }];
     for (const section of sections) {
-      streams.push({ kind: "section", id: section.id, bookmark: null });
+      streams.push({ kind: "section", id: section.id, name: section.name, bookmark: null });
     }
     return streams;
   }
@@ -139,7 +138,13 @@ export class BoardCrawler {
     stream.bookmark = bookmark;
     if (!bookmark) stream.done = true;
 
-    return { pinIds: pinIdsOf(items), duplicates: 0, stream: stream.kind, pagesLeft: this.remaining };
+    return {
+      pinIds: pinIdsOf(items),
+      duplicates: 0,
+      stream: stream.kind,
+      sectionName: stream.name,
+      pagesLeft: this.remaining,
+    };
   }
 
   /** One page of a stream, or a refused page. */
@@ -169,6 +174,7 @@ export interface PageResult {
   pinIds: string[];
   duplicates: number;
   stream: "feed" | "section";
+  sectionName?: string;
   pagesLeft?: number;
   error?: string;
 }

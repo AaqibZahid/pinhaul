@@ -1,157 +1,149 @@
-// The extension's entry point.
-//
-// It owns the job: it starts it, listens for Chrome's download events, and starts
-// again when the browser does or when a watchdog alarm fires. Nothing here
-// depends on the popup being open.
-
-import { parseBoardRef } from "../shared/boardref";
 import type { Request } from "../shared/messages";
+import type { BoardRef, BoardSummary, DownloadProgress } from "../shared/types";
+import { listAccountBoards } from "./account";
+import { downloadBoard } from "./download";
 import { PinterestClient } from "./pinterest";
-import { JobRunner, progressOf } from "./job";
-import { createStorageStore } from "./storage";
-import type { DownloadItem, Downloader } from "./ports";
 
 const client = new PinterestClient({ intervalMs: 110 });
-const store = createStorageStore(chrome.storage.local);
-const downloader = createChromeDownloader();
-const runner = new JobRunner({
-  client,
-  store,
-  downloader,
-  fetchText: (url) => clientText(url),
-  fetchBytes: (url, range) => clientBytes(url, range),
-});
+const BOARDS_KEY = "accountBoards";
 
-/** Chrome's downloads API, behind the interface the runner expects. */
-function createChromeDownloader(): Downloader {
-  return {
-    async start(request) {
-      const id = await chrome.downloads.download({
-        url: request.url,
-        filename: request.filename,
-        saveAs: false,
-        conflictAction: "uniquify",
-      });
-      return id;
-    },
-    async find(ids) {
-      // Chrome's search takes one id at a time.
-      const items: DownloadItem[] = [];
-      for (const id of ids) {
-        const found = await chrome.downloads.search({ id });
-        const item = found[0];
-        if (!item) continue;
-        items.push({ id: item.id, state: chromeDownloadState(item.state), error: item.error ?? undefined });
-      }
-      return items;
-    },
-    reveal() {
-      chrome.downloads.showDefaultFolder();
-    },
-  };
-}
-
-function chromeDownloadState(state: string): DownloadItem["state"] {
-  if (state === "complete") return "complete";
-  if (state === "interrupted") return "interrupted";
-  return "in_progress";
-}
-
-async function clientText(url: string): Promise<string> {
-  const response = await fetch(url, { credentials: "include" });
-  return response.text();
-}
-
-async function clientBytes(url: string, range?: { offset: number; length: number }): Promise<Uint8Array> {
-  const headers: Record<string, string> = {};
-  if (range) {
-    const end = range.offset + range.length - 1;
-    headers.Range = `bytes=${range.offset}-${end}`;
-  }
-  const response = await fetch(url, { headers, credentials: "include" });
-  return new Uint8Array(await response.arrayBuffer());
-}
-
-/** Chrome's own download events, which only fire while the service worker is
- * listening, so the listener is registered at the top level. */
-chrome.downloads.onChanged.addListener(({ id, state }) => {
-  if (!state?.current) return;
-  runner.reportDownloadChange(id, state.current, undefined);
-});
+let active: {
+  controller: AbortController;
+  progress: DownloadProgress;
+  downloadId?: number;
+} | null = null;
+let lastProgress: DownloadProgress | null = null;
 
 chrome.runtime.onMessage.addListener((message: Request, _sender, respond) => {
-  handle(message).then(respond, (error: unknown) =>
-    respond({ ok: false, error: error instanceof Error ? error.message : String(error) }),
-  );
+  handle(message).then(respond, (error: unknown) => respond({ ok: false, error: messageOf(error) }));
   return true;
 });
 
 async function handle(message: Request): Promise<unknown> {
   switch (message.type) {
-    case "detectBoard": {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      const url = tabs[0]?.url;
-      if (!url) return { board: null, error: "Open a board, or paste a board link." };
-      const parsed = parseBoardRef(url);
-      return parsed.ok ? { board: parsed.ref } : { board: null };
-    }
-    case "start": {
-      const started = await runner.start(message.ref, message.source);
-      await watchJob();
-      return { ok: true, value: started };
-    }
+    case "syncBoards":
+      return { ok: true, value: await syncBoards() };
+    case "downloadBoard":
+      return startDownload(message.ref, message.saveAs);
     case "status":
-      return { ok: true, value: await status() };
-    case "pause":
-      runner.pause();
-      await watchJob();
-      return { ok: true, value: await status() };
-    case "resume":
-      await runner.resume();
-      await watchJob();
-      return { ok: true, value: await status() };
-    case "retry":
-      await runner.retryFailed();
-      await watchJob();
-      return { ok: true, value: await status() };
+      return { ok: true, value: active?.progress ?? lastProgress };
     case "cancel":
-      await runner.cancel();
-      await watchJob();
-      return { ok: true, value: null };
-    case "openFolder":
-      downloader.reveal();
+      await cancelDownload();
+      return { ok: true, value: lastProgress };
+    case "openPinterest":
+      await chrome.tabs.create({ url: "https://www.pinterest.com/" });
       return { ok: true, value: null };
     default:
       return { ok: false, error: "unknown message" };
   }
 }
 
-/** The job as it stands, whether or not this run of the service worker owns the
- * job right now. */
-async function status() {
-  const job = await store.load();
-  if (!job) return null;
-  const memory = runner.progress();
-  return memory ? memory : progressOf(job, job.updatedAt);
+async function syncBoards(): Promise<BoardSummary[]> {
+  try {
+    const boards = await listAccountBoards(client);
+    await chrome.storage.local.set({ [BOARDS_KEY]: boards });
+    return boards;
+  } catch (error) {
+    const cached = await chrome.storage.local.get(BOARDS_KEY);
+    const boards = cached[BOARDS_KEY] as BoardSummary[] | undefined;
+    if (boards?.length) return boards;
+    throw error;
+  }
 }
 
-/** The watchdog that carries a job on if the service worker was stopped. */
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name !== "pinpull-watchdog") return;
-  void runner.resume();
-});
-
-chrome.runtime.onStartup.addListener(() => void runner.resume());
-chrome.runtime.onInstalled.addListener(() => void runner.resume());
-
-const WATCHDOG = "pinpull-watchdog";
-
-/** Keeps a scheduled wake-up while a job is running, and stops it when it is
- * not. Chrome resets it whenever the job asks again. */
-async function watchJob(): Promise<void> {
-  const job = await store.load();
-  const running = job && job.phase !== "done" && job.phase !== "paused" && job.phase !== "error";
-  const existing = await chrome.alarms.get(WATCHDOG);
-  if (running && !existing) await chrome.alarms.create(WATCHDOG, { periodInMinutes: 0.5 });
-  if (!running && existing) await chrome.alarms.clear(WATCHDOG);
+function startDownload(ref: BoardRef, saveAs: boolean): { ok: boolean; value?: DownloadProgress; error?: string } {
+  if (active) return { ok: false, error: "A board download is already in progress." };
+  const controller = new AbortController();
+  const progress: DownloadProgress = {
+    phase: "idle",
+    board: { ...ref, id: "", name: ref.slug, url: `https://www.pinterest.com/${ref.username}/${ref.slug}/`, pinCount: null, sectionCount: null },
+    discovered: 0,
+    processed: 0,
+    files: 0,
+    skipped: 0,
+    failed: 0,
+    detail: "Starting",
+    updatedAt: Date.now(),
+  };
+  active = { controller, progress };
+  void runDownload(ref, saveAs, controller);
+  return { ok: true, value: progress };
 }
+
+async function runDownload(ref: BoardRef, saveAs: boolean, controller: AbortController): Promise<void> {
+  try {
+    const result = await downloadBoard(
+      ref,
+      saveAs,
+      {
+        client,
+        save: (url, filename, ask) => saveZip(url, filename, ask),
+        wait: waitForDownload,
+      },
+      (progress) => {
+        if (active?.controller === controller) active.progress = progress;
+      },
+      controller.signal,
+    );
+    lastProgress = result;
+  } catch (error) {
+    const current = active?.progress;
+    if (isAbort(error)) {
+      lastProgress = current ? { ...current, phase: "cancelled", detail: "Download cancelled", updatedAt: Date.now() } : null;
+    } else {
+      lastProgress = current
+        ? { ...current, phase: "error", detail: "Download failed", error: messageOf(error), updatedAt: Date.now() }
+        : null;
+    }
+  } finally {
+    active = null;
+  }
+}
+
+async function saveZip(url: string, filename: string, saveAs: boolean): Promise<number> {
+  const id = await chrome.downloads.download({ url, filename, saveAs, conflictAction: "uniquify" });
+  if (active) active.downloadId = id;
+  return id;
+}
+
+async function cancelDownload(): Promise<void> {
+  const current = active;
+  if (!current) return;
+  current.controller.abort();
+  if (current.downloadId === undefined) return;
+  await chrome.downloads.cancel(current.downloadId).catch(() => undefined);
+  await chrome.downloads.removeFile(current.downloadId).catch(() => undefined);
+}
+
+function waitForDownload(id: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const finish = (error?: Error) => {
+      chrome.downloads.onChanged.removeListener(listener);
+      signal.removeEventListener("abort", aborted);
+      error ? reject(error) : resolve();
+    };
+    const check = async () => {
+      const item = (await chrome.downloads.search({ id }))[0];
+      if (item?.state === "complete") finish();
+      else if (item?.state === "interrupted") finish(new Error(item.error ?? "Chrome interrupted the ZIP download"));
+    };
+    const listener = (delta: chrome.downloads.DownloadDelta) => {
+      if (delta.id !== id || !delta.state?.current) return;
+      if (delta.state.current === "complete") finish();
+      if (delta.state.current === "interrupted") finish(new Error(delta.error?.current ?? "Chrome interrupted the ZIP download"));
+    };
+    const aborted = () => finish(new DOMException("Download cancelled", "AbortError"));
+    chrome.downloads.onChanged.addListener(listener);
+    signal.addEventListener("abort", aborted, { once: true });
+    void check();
+  });
+}
+
+function isAbort(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+

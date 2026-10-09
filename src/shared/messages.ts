@@ -3,15 +3,8 @@
 import type { BoardRef } from "./types";
 
 export type Request =
-  | { type: "detectBoard" }
-  | { type: "start"; ref: BoardRef; source: "tab" | "input" }
+  | { type: "syncBoards" }
+  | { type: "downloadBoard"; ref: BoardRef; saveAs: boolean }
   | { type: "status" }
-  | { type: "pause" }
-  | { type: "resume" }
-  | { type: "retry" }
   | { type: "cancel" }
-  | { type: "openFolder" };
-
-export type BoardDetection =
-  | { board: BoardRef; source: "tab" }
-  | { board: null; error?: string };
+  | { type: "openPinterest" };
