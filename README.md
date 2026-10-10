@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="docs/pinpull-mark.svg" width="80" height="80" alt="Pinpull mark" />
+<img src="docs/pinhaul-mark.svg" width="80" height="80" alt="Pinhaul mark" />
 
-# Pinpull
+# Pinhaul
 
 **Download complete Pinterest boards as organized ZIP archives.**
 
-[![CI](https://github.com/AaqibZahid/pinpull/actions/workflows/ci.yml/badge.svg)](https://github.com/AaqibZahid/pinpull/actions/workflows/ci.yml)
+[![CI](https://github.com/AaqibZahid/pinhaul/actions/workflows/ci.yml/badge.svg)](https://github.com/AaqibZahid/pinhaul/actions/workflows/ci.yml)
 [![Chrome MV3](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f1e9dc.svg)](LICENSE)
@@ -15,7 +15,7 @@ Account boards · Private boards · Sections · Images · MP4 · HLS · Multi-bo
 
 </div>
 
-Pinpull is a local-first Chrome extension. It uses the Pinterest session already signed into Chrome, discovers the account's boards, and saves each chosen board as one ZIP. There is no Pinpull account, OAuth flow, backend, analytics service, or second login window.
+Pinhaul is a local-first Chrome extension. It uses the Pinterest session already signed into Chrome, discovers the account's boards, and saves each chosen board as one ZIP. There is no Pinhaul account, OAuth flow, backend, analytics service, or second login window.
 
 ## Highlights
 
@@ -38,29 +38,29 @@ Board name/
 
 ## Install locally
 
-Requirements: Chrome 116+. Download the ZIP from the [latest GitHub Release](https://github.com/AaqibZahid/pinpull/releases/latest), extract it, and load the extracted folder containing `manifest.json` in Chrome. The ZIP itself cannot be loaded as an unpacked extension.
+Requirements: Chrome 116+. Download the ZIP from the [latest GitHub Release](https://github.com/AaqibZahid/pinhaul/releases/latest), extract it, and load the extracted folder containing `manifest.json` in Chrome. The ZIP itself cannot be loaded as an unpacked extension.
 
 To build from source, you also need Node.js 20+:
 
 ```sh
-git clone https://github.com/AaqibZahid/pinpull.git
-cd pinpull
+git clone https://github.com/AaqibZahid/pinhaul.git
+cd pinhaul
 npm ci
 npm run build
 ```
 
 For either option, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the extracted release folder or generated `dist` folder. Chrome's [unpacked-extension guide](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked) shows the same steps.
 
-After pulling or rebuilding, press **Reload** on Pinpull's extension card before testing changes.
+After pulling or rebuilding, press **Reload** on Pinhaul's extension card before testing changes.
 
 ## Use
 
 1. Sign in to Pinterest normally in the same Chrome profile. You can then close the Pinterest tab; it does not need to stay open, but your sign-in session must remain valid.
-2. Open Pinpull from the extensions toolbar.
+2. Open Pinhaul from the extensions toolbar.
 3. Select one or more account boards, then choose **Download selected**. Use **ZIP** for a single board.
 4. For another public board, paste its Pinterest URL or `username/boardname`.
 5. Enable **Ask where to save the ZIP** when a custom destination is needed.
-6. Each board has its own progress card and **Stop** button. Stop cancels only that board and hides its card. Before save, no file is written; during Chrome's final write, Pinpull asks Chrome to cancel and remove the partial ZIP.
+6. Each board has its own progress card and **Stop** button. Stop cancels only that board and hides its card. Before save, no file is written; during Chrome's final write, Pinhaul asks Chrome to cancel and remove the partial ZIP.
 
 Board synchronization runs when the popup opens, when Refresh is pressed, and periodically while the popup remains open. Pinterest does not provide a push channel for immediate board updates.
 
@@ -68,7 +68,7 @@ If the board list is empty, confirm that Pinterest is signed in **in the same Ch
 
 ## Privacy and permissions
 
-Pinpull processes board metadata and media locally. It does not ask for a Pinterest password or transmit board data to a Pinpull server.
+Pinhaul processes board metadata and media locally. It does not ask for a Pinterest password or transmit board data to a Pinhaul server.
 
 | Permission | Why it is needed |
 | --- | --- |
@@ -87,9 +87,9 @@ npm run smoke:extension
 npm run package:extension
 ```
 
-`npm run smoke:extension` starts Chrome with a disposable profile and verifies that the unpacked extension and service worker load. Set `PINPULL_CHROME` if Chrome is outside its standard Windows location.
+`npm run smoke:extension` starts Chrome with a disposable profile and verifies that the unpacked extension and service worker load. Set `PINHAUL_CHROME` if Chrome is outside its standard Windows location.
 
-`npm run package:extension` creates `artifacts/pinpull-v1.0.0.zip` with `manifest.json` at the archive root. Generated `dist/` and `artifacts/` directories are intentionally ignored by Git.
+`npm run package:extension` creates `artifacts/pinhaul-v1.0.0.zip` with `manifest.json` at the archive root. Generated `dist/` and `artifacts/` directories are intentionally ignored by Git.
 
 ## Project structure
 
@@ -105,4 +105,4 @@ docs/             README artwork
 
 ## License
 
-[MIT](LICENSE) © 2026 Pinpull contributors.
+[MIT](LICENSE) © 2026 Pinhaul contributors.
