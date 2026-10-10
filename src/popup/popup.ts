@@ -199,6 +199,10 @@ async function poll(): Promise<void> {
 }
 
 function showAll(progresses: DownloadProgress[]): void {
+  if (!Array.isArray(progresses)) {
+    setMessage("Pinpull was updated. Reload it in chrome://extensions and reopen the popup.", true);
+    return;
+  }
   const before = boards.map((board) => isRunning(boardKey(board))).join();
   for (const progress of progresses) {
     const board = progress.board;
