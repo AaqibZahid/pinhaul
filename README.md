@@ -55,7 +55,7 @@ After pulling or rebuilding, press **Reload** on Pinpull's extension card before
 
 ## Use
 
-1. Sign in to Pinterest normally in the same Chrome profile.
+1. Sign in to Pinterest normally in the same Chrome profile. You can then close the Pinterest tab; it does not need to stay open, but your sign-in session must remain valid.
 2. Open Pinpull from the extensions toolbar.
 3. Select one or more account boards, then choose **Download selected**. Use **ZIP** for a single board.
 4. For another public board, paste its Pinterest URL or `username/boardname`.
