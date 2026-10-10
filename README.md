@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/pinpull-mark.svg" width="80" height="80" alt="Pinpull mark" />
+
 # Pinpull
 
 **Download complete Pinterest boards as organized ZIP archives.**
@@ -45,7 +47,9 @@ npm ci
 npm run build
 ```
 
-Then open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the generated `dist` folder.
+Then open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the generated `dist` folder. Chrome's [unpacked-extension guide](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked) shows the same steps.
+
+If you have a packaged Pinpull ZIP instead of the source, **extract it first** and select the extracted folder containing `manifest.json`. Do not select the ZIP itself; this is a local unpacked extension, not a Chrome Web Store installation.
 
 After pulling or rebuilding, press **Reload** on Pinpull's extension card before testing changes.
 
@@ -56,9 +60,11 @@ After pulling or rebuilding, press **Reload** on Pinpull's extension card before
 3. Select one or more account boards, then choose **Download selected**. Use **ZIP** for a single board.
 4. For another public board, paste its Pinterest URL or `username/boardname`.
 5. Enable **Ask where to save the ZIP** when a custom destination is needed.
-6. Choose **Stop** to cancel the active board and the remaining queue.
+6. Choose **Stop** to cancel the active board and the remaining queue. Its progress card disappears. Before save, no file is written; during Chrome's final write, Pinpull asks Chrome to cancel and remove the partial ZIP.
 
 Board synchronization runs when the popup opens, when Refresh is pressed, and periodically while the popup remains open. Pinterest does not provide a push channel for immediate board updates.
+
+If the board list is empty, confirm that Pinterest is signed in **in the same Chrome profile**, then press Refresh. If Pinterest changes its private web API, the extension may need an update; see [Known limits](#known-limits).
 
 ## Privacy and permissions
 
@@ -94,6 +100,7 @@ src/popup/        account picker, queue controls and progress UI
 src/shared/       parsing, filenames, HLS and shared types
 tests/            unit and integration fixtures
 scripts/          packaging and Chrome smoke-test helpers
+docs/             README artwork
 ```
 
 ## Known limits
