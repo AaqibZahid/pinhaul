@@ -41,8 +41,7 @@ main { position: relative; display: flex; flex-direction: column; gap: 14px; pad
 .topbar, .intro, .stats, .progress-heading, .brand, .account-state, .queue-actions { display: flex; align-items: center; }
 .topbar, .intro, .stats, .queue-actions { justify-content: space-between; }
 .brand { gap: 11px; }
-.brand-mark { display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid rgba(255,255,255,.14); border-radius: 12px 12px 12px 4px; background: linear-gradient(145deg, var(--accent-bright), #c84234); box-shadow: 0 8px 24px rgba(200,66,52,.25), inset 0 1px rgba(255,255,255,.28); }
-.brand-mark span { font: 800 21px/1 "Segoe UI", sans-serif; transform: translateY(-1px); }
+.brand-mark { display: block; width: 38px; height: 38px; object-fit: contain; }
 .eyebrow, .section-title, .list-heading { margin: 0; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
 h1 { margin: -1px 0 0; font-family: "Segoe UI Variable Display", "Aptos Display", "Segoe UI", sans-serif; font-size: 25px; font-weight: 760; letter-spacing: -.045em; line-height: 1; }
 .tagline { margin: 3px 0 1px; max-width: 330px; font-family: "Georgia", serif; font-size: 26px; line-height: 1.05; letter-spacing: -.035em; text-wrap: balance; }
