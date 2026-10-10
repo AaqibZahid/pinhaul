@@ -194,11 +194,14 @@ async function ensureOffscreenDocument(): Promise<void> {
 async function cancelDownload(): Promise<void> {
   const current = active;
   if (!current) return;
+  const downloadId = current.downloadId;
   current.controller.abort();
-  if (current.downloadId === undefined) return;
-  await chrome.downloads.cancel(current.downloadId).catch(() => undefined);
-  await chrome.downloads.removeFile(current.downloadId).catch(() => undefined);
-  releaseObjectUrl(current.downloadId);
+  if (downloadId !== undefined) {
+    await chrome.downloads.cancel(downloadId).catch(() => undefined);
+    await chrome.downloads.removeFile(downloadId).catch(() => undefined);
+    releaseObjectUrl(downloadId);
+  }
+  await current.promise;
 }
 
 function waitForDownload(id: number, signal: AbortSignal): Promise<void> {
