@@ -188,7 +188,9 @@ function show(progress: DownloadProgress | null): void {
   phaseLabel.textContent = `${labelFor(progress.phase)}${queue}`;
   detailLabel.textContent = progress.detail;
   const issues = [progress.skipped ? `${progress.skipped} skipped` : "", progress.failed ? `${progress.failed} failed` : ""].filter(Boolean);
-  statsLabel.textContent = `${progress.processed}/${progress.discovered} pins · ${progress.files} files${issues.length ? ` · ${issues.join(" · ")}` : ""}`;
+  statsLabel.textContent = progress.phase === "done"
+    ? `${progress.images} images · ${progress.videos} videos${issues.length ? ` · ${issues.join(" · ")}` : ""}`
+    : `${progress.processed}/${progress.discovered} pins · ${progress.files} files${issues.length ? ` · ${issues.join(" · ")}` : ""}`;
   const fraction = progress.discovered ? progress.processed / progress.discovered : progress.phase === "packaging" || progress.phase === "saving" || progress.phase === "done" ? 1 : 0.05;
   barFill.style.width = `${Math.max(3, Math.min(100, fraction * 100))}%`;
   cancelButton.disabled = ["done", "cancelled", "error"].includes(progress.phase);
