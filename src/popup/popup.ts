@@ -168,8 +168,9 @@ async function start(items: Array<BoardSummary | BoardRef>): Promise<void> {
 async function poll(): Promise<void> {
   while (active) {
     const reply = await send<DownloadProgress | null>({ type: "status" });
-    show(reply.value ?? null);
     const phase = reply.value?.phase;
+    if (phase === "cancelled") progressPanel.classList.add("hidden");
+    else show(reply.value ?? null);
     if (phase === "done" || phase === "cancelled" || phase === "error") {
       active = false;
       renderBoards(boards);
@@ -208,7 +209,21 @@ function labelFor(phase: string): string {
 
 refreshButton.addEventListener("click", () => void sync());
 connectButton.addEventListener("click", () => void send({ type: "openPinterest" }));
-cancelButton.addEventListener("click", () => void send({ type: "cancel" }));
+cancelButton.addEventListener("click", () => {
+  progressPanel.classList.add("hidden");
+  void send<DownloadProgress | null>({ type: "cancel" }).then((reply) => {
+    if (reply.ok && reply.value?.phase !== "done") return;
+    progressPanel.classList.remove("hidden");
+    if (reply.ok && reply.value) {
+      show(reply.value);
+      return;
+    }
+    setMessage(reply.error ?? "Could not stop the download.", true);
+  }, () => {
+    progressPanel.classList.remove("hidden");
+    setMessage("Could not stop the download.", true);
+  });
+});
 clearSelected.addEventListener("click", () => {
   selected.clear();
   renderBoards(boards);
