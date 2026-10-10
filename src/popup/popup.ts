@@ -16,12 +16,8 @@ const clearSelected = byId<HTMLButtonElement>("clear-selected");
 const downloadSelected = byId<HTMLButtonElement>("download-selected");
 const manualForm = byId<HTMLFormElement>("manual-form");
 const boardInput = byId<HTMLInputElement>("board-input");
-const progressPanel = byId<HTMLElement>("progress");
-const phaseLabel = byId<HTMLElement>("phase");
-const detailLabel = byId<HTMLElement>("detail");
-const statsLabel = byId<HTMLElement>("stats");
-const barFill = byId<HTMLElement>("bar-fill");
-const cancelButton = byId<HTMLButtonElement>("cancel");
+const downloads = byId<HTMLElement>("downloads");
+const progressTemplate = byId<HTMLTemplateElement>("progress-template");
 
 interface Reply<T = unknown> {
   ok: boolean;
@@ -32,8 +28,13 @@ interface Reply<T = unknown> {
 
 let boards: BoardSummary[] = [];
 const selected = new Set<string>();
+const progressByKey = new Map<string, DownloadProgress>();
+const cards = new Map<string, HTMLElement>();
+const pendingKeys = new Set<string>();
+const stopping = new Set<string>();
 let syncing = false;
-let active = false;
+let polling = false;
+let startsInFlight = 0;
 
 function byId<T extends HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
@@ -51,7 +52,7 @@ function setMessage(text: string, error = false, showConnect = false): void {
 }
 
 async function sync(): Promise<void> {
-  if (syncing || active) return;
+  if (syncing || hasRunning()) return;
   syncing = true;
   refreshButton.classList.add("spinning");
   setMessage("");
@@ -89,7 +90,7 @@ function createBoardCard(board: BoardSummary): HTMLElement {
   pick.className = "board-picker";
   pick.type = "checkbox";
   pick.checked = selected.has(key);
-  pick.disabled = active;
+  pick.disabled = isRunning(key);
   pick.ariaLabel = `Select ${board.name}`;
   pick.addEventListener("change", () => {
     pick.checked ? selected.add(key) : selected.delete(key);
@@ -121,7 +122,7 @@ function createBoardCard(board: BoardSummary): HTMLElement {
   button.type = "button";
   button.textContent = "ZIP";
   button.title = `Download ${board.name}`;
-  button.disabled = active;
+  button.disabled = isRunning(key);
   button.addEventListener("click", () => void start([board]));
   body.append(title, meta);
   card.append(body, button);
@@ -137,8 +138,8 @@ function renderQueueActions(): void {
   queueActions.classList.toggle("hidden", count === 0);
   selectedCount.textContent = `${count} board${count === 1 ? "" : "s"} selected`;
   downloadSelected.textContent = count === 1 ? "Download selected" : `Download ${count} boards`;
-  downloadSelected.disabled = active || count === 0;
-  clearSelected.disabled = active;
+  downloadSelected.disabled = count === 0 || [...selected].every(isRunning);
+  clearSelected.disabled = false;
 }
 
 function count(value: number | null, noun: string): string {
@@ -147,58 +148,106 @@ function count(value: number | null, noun: string): string {
 }
 
 async function start(items: Array<BoardSummary | BoardRef>): Promise<void> {
-  if (active || items.length === 0) return;
-  active = true;
+  const fresh = items.filter((item) => !isRunning(boardKey(item)));
+  if (fresh.length === 0) return;
+  for (const item of fresh) {
+    const key = boardKey(item);
+    pendingKeys.add(key);
+    const card = cardFor(key);
+    card.classList.remove("hidden", "finished", "failed");
+    card.querySelector<HTMLElement>(".phase")!.textContent = "Starting";
+    card.querySelector<HTMLElement>(".progress-board")!.textContent = "name" in item ? item.name : item.slug;
+    card.querySelector<HTMLElement>(".detail")!.textContent = "Preparing download";
+    card.querySelector<HTMLElement>(".progress-stats")!.textContent = "0 pins · 0 files";
+    card.querySelector<HTMLElement>(".bar-fill")!.style.width = "3%";
+    card.querySelector<HTMLButtonElement>(".cancel")!.disabled = false;
+  }
   selected.clear();
   renderBoards(boards);
   renderQueueActions();
-  progressPanel.classList.remove("hidden");
-  const refs = items.map(({ username, slug }) => ({ username, slug }));
-  void send<DownloadProgress>({ type: "downloadBoards", refs, saveAs: saveAs.checked }).then((reply) => {
-    if (reply.ok) return;
-    active = false;
-    progressPanel.classList.add("hidden");
-    setMessage(reply.error ?? "The download could not start.", true);
+  const refs = fresh.map(({ username, slug }) => ({ username, slug }));
+  startsInFlight += 1;
+  void send({ type: "downloadBoards", refs, saveAs: saveAs.checked }).then((reply) => {
+    if (!reply.ok) setMessage(reply.error ?? "The download could not start.", true);
+  }, () => setMessage("The download could not start.", true)).finally(() => {
+    startsInFlight -= 1;
+    for (const ref of refs) pendingKeys.delete(boardKey(ref));
     renderBoards(boards);
     renderQueueActions();
   });
-  await poll();
+  void poll();
 }
 
 async function poll(): Promise<void> {
-  while (active) {
-    const reply = await send<DownloadProgress | null>({ type: "status" });
-    const phase = reply.value?.phase;
-    if (phase === "cancelled") progressPanel.classList.add("hidden");
-    else show(reply.value ?? null);
-    if (phase === "done" || phase === "cancelled" || phase === "error") {
-      active = false;
-      renderBoards(boards);
-      renderQueueActions();
-      if (phase === "error") setMessage(reply.value?.error ?? "The download failed.", true);
-      break;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 450));
+  if (polling) return;
+  polling = true;
+  try {
+    do {
+      const reply = await send<DownloadProgress[]>({ type: "status" });
+      if (reply.ok) showAll(reply.value ?? []);
+      await new Promise((resolve) => setTimeout(resolve, 450));
+    } while (hasRunning() || startsInFlight > 0);
+  } finally {
+    polling = false;
   }
 }
 
-function show(progress: DownloadProgress | null): void {
-  if (!progress) return;
-  const queue = progress.queueTotal && progress.queueTotal > 1 ? ` · ${progress.queuePosition ?? 1}/${progress.queueTotal}` : "";
-  phaseLabel.textContent = `${labelFor(progress.phase)}${queue}`;
-  detailLabel.textContent = progress.detail;
+function showAll(progresses: DownloadProgress[]): void {
+  const before = boards.map((board) => isRunning(boardKey(board))).join();
+  for (const progress of progresses) {
+    const board = progress.board;
+    if (!board) continue;
+    const key = boardKey(board);
+    pendingKeys.delete(key);
+    progressByKey.set(key, progress);
+    if (progress.phase === "cancelled") {
+      cards.get(key)?.remove();
+      cards.delete(key);
+    } else if (!stopping.has(key)) show(progress, cardFor(key));
+  }
+  if (before !== boards.map((board) => isRunning(boardKey(board))).join()) {
+    renderBoards(boards);
+    renderQueueActions();
+  }
+}
+
+function show(progress: DownloadProgress, card: HTMLElement): void {
+  card.querySelector<HTMLElement>(".phase")!.textContent = labelFor(progress.phase);
+  card.querySelector<HTMLElement>(".progress-board")!.textContent = progress.board?.name ?? "Board";
+  card.querySelector<HTMLElement>(".detail")!.textContent = progress.error ?? progress.detail;
   const issues = [progress.skipped ? `${progress.skipped} skipped` : "", progress.failed ? `${progress.failed} failed` : ""].filter(Boolean);
-  statsLabel.textContent = progress.phase === "done"
+  card.querySelector<HTMLElement>(".progress-stats")!.textContent = progress.phase === "done"
     ? `${progress.images} images · ${progress.videos} videos${issues.length ? ` · ${issues.join(" · ")}` : ""}`
     : `${progress.processed}/${progress.discovered} pins · ${progress.files} files${issues.length ? ` · ${issues.join(" · ")}` : ""}`;
   const fraction = progress.discovered ? progress.processed / progress.discovered : progress.phase === "packaging" || progress.phase === "saving" || progress.phase === "done" ? 1 : 0.05;
-  barFill.style.width = `${Math.max(3, Math.min(100, fraction * 100))}%`;
-  cancelButton.disabled = ["done", "cancelled", "error"].includes(progress.phase);
-  progressPanel.classList.toggle("finished", progress.phase === "done");
+  card.querySelector<HTMLElement>(".bar-fill")!.style.width = `${Math.max(3, Math.min(100, fraction * 100))}%`;
+  card.querySelector<HTMLButtonElement>(".cancel")!.disabled = !isRunning(boardKey(progress.board!));
+  card.classList.toggle("finished", progress.phase === "done");
+  card.classList.toggle("failed", progress.phase === "error");
+}
+
+function cardFor(key: string): HTMLElement {
+  let card = cards.get(key);
+  if (card) return card;
+  card = progressTemplate.content.firstElementChild!.cloneNode(true) as HTMLElement;
+  card.querySelector<HTMLButtonElement>(".cancel")!.addEventListener("click", () => void stop(key));
+  cards.set(key, card);
+  downloads.prepend(card);
+  return card;
+}
+
+function isRunning(key: string): boolean {
+  const phase = progressByKey.get(key)?.phase;
+  return pendingKeys.has(key) || (phase !== undefined && !["done", "cancelled", "error"].includes(phase));
+}
+
+function hasRunning(): boolean {
+  return pendingKeys.size > 0 || [...progressByKey.keys()].some(isRunning);
 }
 
 function labelFor(phase: string): string {
   if (phase === "resolving") return "Reading board";
+  if (phase === "idle") return "Waiting";
   if (phase === "discovering") return "Finding pins";
   if (phase === "downloading") return "Downloading";
   if (phase === "packaging") return "Building ZIP";
@@ -211,21 +260,23 @@ function labelFor(phase: string): string {
 
 refreshButton.addEventListener("click", () => void sync());
 connectButton.addEventListener("click", () => void send({ type: "openPinterest" }));
-cancelButton.addEventListener("click", () => {
-  progressPanel.classList.add("hidden");
-  void send<DownloadProgress | null>({ type: "cancel" }).then((reply) => {
-    if (reply.ok && reply.value?.phase !== "done") return;
-    progressPanel.classList.remove("hidden");
-    if (reply.ok && reply.value) {
-      show(reply.value);
-      return;
-    }
-    setMessage(reply.error ?? "Could not stop the download.", true);
-  }, () => {
-    progressPanel.classList.remove("hidden");
-    setMessage("Could not stop the download.", true);
-  });
-});
+
+async function stop(key: string): Promise<void> {
+  stopping.add(key);
+  cards.get(key)?.classList.add("hidden");
+  try {
+    const reply = await send<DownloadProgress | null>({ type: "cancel", key });
+    if (!reply.ok) throw new Error(reply.error ?? "Could not stop the download.");
+    stopping.delete(key);
+    if (reply.value?.phase === "done") cards.get(key)?.classList.remove("hidden");
+    if (reply.value) showAll([reply.value]);
+  } catch (error) {
+    cards.get(key)?.classList.remove("hidden");
+    setMessage(error instanceof Error ? error.message : "Could not stop the download.", true);
+  } finally {
+    stopping.delete(key);
+  }
+}
 clearSelected.addEventListener("click", () => {
   selected.clear();
   renderBoards(boards);
@@ -250,13 +301,7 @@ setInterval(() => void sync(), 30_000);
 
 async function initialize(): Promise<void> {
   await sync();
-  const reply = await send<DownloadProgress | null>({ type: "status" });
-  const progress = reply.value;
-  if (!progress || ["done", "cancelled", "error"].includes(progress.phase)) return;
-  active = true;
-  progressPanel.classList.remove("hidden");
-  renderBoards(boards);
-  renderQueueActions();
-  show(progress);
-  await poll();
+  const reply = await send<DownloadProgress[]>({ type: "status" });
+  if (reply.ok) showAll(reply.value ?? []);
+  if (hasRunning()) await poll();
 }

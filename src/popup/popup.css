@@ -21,7 +21,9 @@ body {
   margin: 0;
   width: 420px;
   min-height: 540px;
+  max-height: 600px;
   overflow-x: hidden;
+  overflow-y: auto;
   background:
     radial-gradient(circle at 86% -8%, rgba(239, 104, 86, .15), transparent 33%),
     radial-gradient(circle at -12% 40%, rgba(221, 185, 128, .07), transparent 32%),
@@ -71,6 +73,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent-brig
 .queue-actions > span { font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; }
 .queue-actions > div { display: flex; align-items: center; gap: 8px; }
 .boards { min-height: 74px; max-height: 290px; overflow: auto; padding-right: 4px; scrollbar-color: var(--soft) transparent; scrollbar-width: thin; }
+.downloads { display: flex; flex-direction: column; gap: 8px; }
+.downloads:empty { display: none; }
+.downloads:not(:empty) + .boards { max-height: 180px; }
 .list-heading { display: flex; justify-content: space-between; margin: 1px 3px 9px; }
 .list-heading span:last-child { color: var(--faint); letter-spacing: .04em; text-transform: none; }
 .board-list { display: flex; flex-direction: column; gap: 8px; }
@@ -100,10 +105,13 @@ input[type="text"]:focus { border-color: rgba(239,104,86,.55); background: rgba(
 .secondary:hover:not(:disabled) { background: #fffaf3; }
 .progress { border-color: rgba(239,104,86,.22); animation: lift .28s ease both; }
 .progress-heading { gap: 11px; justify-content: flex-start; }
-.spinner { width: 26px; height: 26px; border: 3px solid var(--soft); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+.progress-heading > div:last-child { min-width: 0; }
+.spinner { flex: 0 0 26px; width: 26px; height: 26px; border: 3px solid var(--soft); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
 .progress.finished .spinner { border-color: #76bf8a; animation: none; }
+.progress.failed .spinner { border-color: var(--accent); animation: none; }
 .progress-heading strong { display: block; font-size: 14px; }
 .progress-heading p { margin: 1px 0 0; color: var(--muted); font-size: 12px; }
+.progress-heading .progress-board { overflow: hidden; color: var(--ink); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .bar { height: 5px; overflow: hidden; border-radius: 10px; background: var(--soft); }
 .bar-fill { width: 3%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #c84234, var(--accent-bright)); box-shadow: 0 0 14px rgba(239,104,86,.35); transition: width .3s cubic-bezier(.2,.8,.2,1); }
 .stats { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
