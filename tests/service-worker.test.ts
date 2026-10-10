@@ -62,6 +62,90 @@ it("deduplicates active and queued boards, then permits a completed board to rer
   await rerun;
 });
 
+it("accepts rapid separate ZIP clicks and keeps both boards active", async () => {
+  const finish = new Map<string, (progress: DownloadProgress) => void>();
+  const { dispatch } = await setup(async (board, _saveAs, _deps, report) => {
+    report(progress(board, "downloading"));
+    return new Promise((resolve) => finish.set(board.slug, resolve));
+  });
+  const first = dispatch({ type: "downloadBoard", ref: ref("one"), saveAs: false });
+  const second = dispatch({ type: "downloadBoard", ref: ref("two"), saveAs: false });
+  expect((await dispatch({ type: "status" })).value).toMatchObject([
+    { phase: "downloading", board: { slug: "one" } },
+    { phase: "downloading", board: { slug: "two" } },
+  ]);
+  finish.get("two")!(progress(ref("two"), "done"));
+  finish.get("one")!(progress(ref("one"), "done"));
+  expect((await first).value).toMatchObject({ phase: "done", board: { slug: "one" } });
+  expect((await second).value).toMatchObject({ phase: "done", board: { slug: "two" } });
+});
+
+it("stops one active board while the other finishes", async () => {
+  const finish = new Map<string, (progress: DownloadProgress) => void>();
+  const { dispatch } = await setup(async (board, _saveAs, _deps, report, signal) => {
+    report(progress(board, "downloading"));
+    return new Promise((resolve, reject) => {
+      finish.set(board.slug, resolve);
+      signal.addEventListener("abort", () => reject(new DOMException("Stopped", "AbortError")), { once: true });
+    });
+  });
+  const first = dispatch({ type: "downloadBoard", ref: ref("one"), saveAs: false });
+  const second = dispatch({ type: "downloadBoard", ref: ref("two"), saveAs: false });
+  expect((await dispatch({ type: "cancel", key: "alice/one" })).value).toMatchObject({ phase: "cancelled" });
+  expect((await dispatch({ type: "status" })).value).toMatchObject([
+    { phase: "cancelled" }, { phase: "downloading" },
+  ]);
+  finish.get("two")!(progress(ref("two"), "done"));
+  expect((await first).value).toMatchObject({ phase: "cancelled" });
+  expect((await second).value).toMatchObject({ phase: "done" });
+});
+
+it("stops both active boards and allows a fresh start", async () => {
+  const finish = new Map<string, (progress: DownloadProgress) => void>();
+  const { dispatch, downloads } = await setup(async (board, _saveAs, _deps, report, signal) => {
+    report(progress(board, "downloading"));
+    return new Promise((resolve, reject) => {
+      finish.set(board.slug, resolve);
+      signal.addEventListener("abort", () => reject(new DOMException("Stopped", "AbortError")), { once: true });
+    });
+  });
+  const first = dispatch({ type: "downloadBoard", ref: ref("one"), saveAs: false });
+  const second = dispatch({ type: "downloadBoard", ref: ref("two"), saveAs: false });
+  const stopped = await Promise.all([
+    dispatch({ type: "cancel", key: "alice/one" }),
+    dispatch({ type: "cancel", key: "alice/two" }),
+  ]);
+  expect(stopped.map((reply) => (reply.value as DownloadProgress).phase)).toEqual(["cancelled", "cancelled"]);
+  await Promise.all([first, second]);
+  expect(downloads).not.toHaveBeenCalled();
+  const restarted = dispatch({ type: "downloadBoard", ref: ref("one"), saveAs: false });
+  expect((await dispatch({ type: "status" })).value).toMatchObject([
+    { phase: "downloading", board: { slug: "one" } }, { phase: "cancelled" },
+  ]);
+  finish.get("one")!(progress(ref("one"), "done"));
+  expect((await restarted).value).toMatchObject({ phase: "done" });
+});
+
+it("starts another board immediately after stopping the first", async () => {
+  const finish = new Map<string, (progress: DownloadProgress) => void>();
+  const { dispatch } = await setup(async (board, _saveAs, _deps, report, signal) => {
+    report(progress(board, "downloading"));
+    return new Promise((resolve, reject) => {
+      finish.set(board.slug, resolve);
+      signal.addEventListener("abort", () => reject(new DOMException("Stopped", "AbortError")), { once: true });
+    });
+  });
+  const first = dispatch({ type: "downloadBoard", ref: ref("one"), saveAs: false });
+  expect((await dispatch({ type: "cancel", key: "alice/one" })).value).toMatchObject({ phase: "cancelled" });
+  const second = dispatch({ type: "downloadBoard", ref: ref("two"), saveAs: false });
+  expect((await dispatch({ type: "status" })).value).toMatchObject([
+    { phase: "cancelled" }, { phase: "downloading", board: { slug: "two" } },
+  ]);
+  finish.get("two")!(progress(ref("two"), "done"));
+  expect((await first).value).toMatchObject({ phase: "cancelled" });
+  expect((await second).value).toMatchObject({ phase: "done" });
+});
+
 it("cancels only the selected ZIP and removes its partial file", async () => {
   const { dispatch, cancel, removeFile, complete, downloads } = await setup(async (board, _saveAs, deps, report, signal) => {
     report(progress(board, "saving"));
