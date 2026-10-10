@@ -41,6 +41,7 @@ describe("downloadBoard", () => {
 
   it("builds one section-aware ZIP from a realistic mixed board", async () => {
     let saved: Blob | undefined;
+    const fetched: string[] = [];
     const client: PinterestGateway = {
       async getData<T>(resource: string, options: Record<string, unknown>): Promise<T> {
         if (resource === "BoardResource") return fixture.board as T;
@@ -58,6 +59,8 @@ describe("downloadBoard", () => {
     const originalFetch = globalThis.fetch;
     vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
       const url = String(input);
+      fetched.push(url);
+      if (url.endsWith("/originals/skip.jpg")) return new Response(null, { status: 403 });
       if (url.endsWith("index.m3u8")) {
         return new Response("#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:1.92,\nclip.ts\n#EXT-X-ENDLIST\n");
       }
@@ -85,6 +88,8 @@ describe("downloadBoard", () => {
       expect(result.processed).toBe(5);
       expect(result.files).toBe(5);
       expect(result.skipped).toBe(0);
+      expect(result.failed).toBe(0);
+      expect(fetched).toContain("https://i.pinimg.com/736x/skip.jpg");
       expect(saved).toBeDefined();
       const names = zipNames(await saved!.arrayBuffer());
       expect(names).toEqual([

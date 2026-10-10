@@ -137,7 +137,14 @@ async function media(item: MediaItem, deps: DownloadDeps, signal: AbortSignal): 
     });
     return { bytes: new Uint8Array(await video.blob.arrayBuffer()), extension: video.extension };
   }
-  return { bytes: await fetchBytes(item.url, signal), extension: extensionOf(item.url, item.kind === "image" ? ".jpg" : ".mp4") };
+  let bytes: Uint8Array;
+  try {
+    bytes = await fetchBytes(item.url, signal);
+  } catch (error) {
+    if (isAbort(error) || item.kind !== "image" || !item.url.startsWith("https://i.pinimg.com/originals/")) throw error;
+    bytes = await fetchBytes(item.url.replace("/originals/", "/736x/"), signal);
+  }
+  return { bytes, extension: extensionOf(item.url, item.kind === "image" ? ".jpg" : ".mp4") };
 }
 
 async function fetchText(url: string, signal: AbortSignal): Promise<string> {
