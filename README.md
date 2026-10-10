@@ -15,7 +15,7 @@ Account boards · Private boards · Sections · Images · MP4 · HLS · Multi-bo
 
 </div>
 
-Pinpull is a private, local-first Chrome extension. It uses the Pinterest session already signed into Chrome, discovers the account's boards, and saves each chosen board as one ZIP. There is no Pinpull account, OAuth flow, backend, analytics service, or second login window.
+Pinpull is a local-first Chrome extension. It uses the Pinterest session already signed into Chrome, discovers the account's boards, and saves each chosen board as one ZIP. There is no Pinpull account, OAuth flow, backend, analytics service, or second login window.
 
 ## Highlights
 
