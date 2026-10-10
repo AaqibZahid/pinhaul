@@ -7,5 +7,5 @@ export type Request =
   | { type: "downloadBoard"; ref: BoardRef; saveAs: boolean }
   | { type: "downloadBoards"; refs: BoardRef[]; saveAs: boolean }
   | { type: "status" }
-  | { type: "cancel" }
+  | { type: "cancel"; key: string }
   | { type: "openPinterest" };

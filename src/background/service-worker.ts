@@ -3,7 +3,6 @@ import type { BoardRef, BoardSummary, BoardSyncResult, DownloadProgress } from "
 import { listAccountBoards } from "./account";
 import { downloadBoard } from "./download";
 import { PinterestClient, PinterestError, type PinterestErrorKind } from "./pinterest";
-import { runBoardQueue } from "./queue";
 
 const client = new PinterestClient({ intervalMs: 110 });
 const BOARDS_KEY = "accountBoards";
@@ -11,14 +10,20 @@ const OFFSCREEN_PATH = "offscreen/offscreen.html";
 const blobChannel = new BroadcastChannel("pinpull-blobs");
 let creatingOffscreen: Promise<void> | null = null;
 
-let active: {
+type Job = {
+  ref: BoardRef;
+  saveAs: boolean;
   controller: AbortController;
   progress: DownloadProgress;
   downloadId?: number;
   objectUrl?: string;
   promise: Promise<void>;
-} | null = null;
-let lastProgress: DownloadProgress | null = null;
+  finish: () => void;
+};
+
+const jobs = new Map<string, Job>();
+const queue: Job[] = [];
+let running = 0;
 
 chrome.runtime.onMessage.addListener((message: Request, _sender, respond) => {
   handle(message).then(respond, (error: unknown) => respond({ ok: false, error: messageOf(error), kind: errorKind(error) }));
@@ -33,19 +38,18 @@ async function handle(message: Request): Promise<unknown> {
       const started = startDownloads([message.ref], message.saveAs);
       if (!started.ok) return started.reply;
       await started.promise;
-      return { ok: true, value: lastProgress };
+      return { ok: true, value: started.jobs[0]?.progress ?? null };
     }
     case "downloadBoards": {
       const started = startDownloads(message.refs, message.saveAs);
       if (!started.ok) return started.reply;
       await started.promise;
-      return { ok: true, value: lastProgress };
+      return { ok: true, value: started.jobs.map((job) => job.progress) };
     }
     case "status":
-      return { ok: true, value: active?.progress ?? lastProgress };
+      return { ok: true, value: [...jobs.values()].map((job) => job.progress) };
     case "cancel":
-      await cancelDownload();
-      return { ok: true, value: lastProgress };
+      return { ok: true, value: await cancelDownload(message.key) };
     case "openPinterest":
       await chrome.tabs.create({ url: "https://www.pinterest.com/" });
       return { ok: true, value: null };
@@ -68,14 +72,24 @@ async function syncBoards(): Promise<BoardSyncResult> {
   }
 }
 
-function startDownloads(refs: BoardRef[], saveAs: boolean): {
-  ok: boolean;
-  reply: { ok: boolean; value?: DownloadProgress; error?: string };
-  promise?: Promise<void>;
-} {
-  if (active) return { ok: false, reply: { ok: false, error: "A board download is already in progress." } };
-  const ref = refs[0];
-  if (!ref) return { ok: false, reply: { ok: false, error: "Choose at least one board." } };
+function startDownloads(refs: BoardRef[], saveAs: boolean):
+  | { ok: false; reply: { ok: false; error: string } }
+  | { ok: true; jobs: Job[]; promise: Promise<void> } {
+  if (refs.length === 0) return { ok: false, reply: { ok: false, error: "Choose at least one board." } };
+  const requested = refs.map((ref) => {
+    const key = `${ref.username}/${ref.slug}`;
+    const existing = jobs.get(key);
+    if (existing && !terminal(existing.progress.phase)) return existing;
+    const job = createJob(ref, saveAs);
+    jobs.set(key, job);
+    queue.push(job);
+    return job;
+  });
+  pump();
+  return { ok: true, jobs: requested, promise: Promise.all(requested.map((job) => job.promise)).then(() => undefined) };
+}
+
+function createJob(ref: BoardRef, saveAs: boolean): Job {
   const controller = new AbortController();
   const progress: DownloadProgress = {
     phase: "idle",
@@ -87,67 +101,67 @@ function startDownloads(refs: BoardRef[], saveAs: boolean): {
     videos: 0,
     skipped: 0,
     failed: 0,
-    detail: "Starting",
+    detail: "Queued",
     updatedAt: Date.now(),
   };
-  const promise = runDownloads(refs, saveAs, controller);
-  active = { controller, progress, promise };
-  return { ok: true, reply: { ok: true, value: progress }, promise };
+  let finish!: () => void;
+  const promise = new Promise<void>((resolve) => { finish = resolve; });
+  return { ref, saveAs, controller, progress, promise, finish };
 }
 
-async function runDownloads(refs: BoardRef[], saveAs: boolean, controller: AbortController): Promise<void> {
-  try {
-    const result = await runBoardQueue(
-      refs,
-      (ref, onProgress, signal) => downloadBoard(
-        ref,
-        saveAs,
-        {
-          client,
-          save: (blob, filename, ask) => saveZip(blob, filename, ask),
-          wait: waitForDownload,
-        },
-        onProgress,
-        signal,
-      ),
-      (progress) => {
-        if (active?.controller === controller) active.progress = progress;
-      },
-      controller.signal,
-    );
-    lastProgress = result;
-  } catch (error) {
-    const current = active?.progress;
-    if (isAbort(error)) {
-      lastProgress = current ? { ...current, phase: "cancelled", detail: "Download cancelled", updatedAt: Date.now() } : null;
-    } else {
-      lastProgress = current
-        ? { ...current, phase: "error", detail: "Download failed", error: messageOf(error), updatedAt: Date.now() }
-        : null;
-    }
-  } finally {
-    if (active?.controller === controller && active.downloadId !== undefined) releaseObjectUrl(active.downloadId);
-    active = null;
+function pump(): void {
+  while (running < 2 && queue.length > 0) {
+    const job = queue.shift()!;
+    if (job.controller.signal.aborted) continue;
+    running += 1;
+    void runDownload(job).finally(() => {
+      running -= 1;
+      job.finish();
+      pump();
+    });
   }
 }
 
-async function saveZip(blob: Blob, filename: string, saveAs: boolean): Promise<number> {
+async function runDownload(job: Job): Promise<void> {
+  try {
+    job.progress = await downloadBoard(
+      job.ref,
+      job.saveAs,
+      {
+        client,
+        save: (blob, filename, ask) => saveZip(job, blob, filename, ask),
+        wait: (id, signal) => waitForDownload(job, id, signal),
+      },
+      (progress) => { job.progress = progress; },
+      job.controller.signal,
+    );
+  } catch (error) {
+    if (job.controller.signal.aborted || isAbort(error)) {
+      job.progress = { ...job.progress, phase: "cancelled", detail: "Download cancelled", updatedAt: Date.now() };
+    } else {
+      job.progress = { ...job.progress, phase: "error", detail: "Download failed", error: messageOf(error), updatedAt: Date.now() };
+    }
+  } finally {
+    if (job.downloadId !== undefined) releaseObjectUrl(job, job.downloadId);
+  }
+}
+
+async function saveZip(job: Job, blob: Blob, filename: string, saveAs: boolean): Promise<number> {
+  if (job.controller.signal.aborted) throw new DOMException("Download cancelled", "AbortError");
   const objectUrl = await createObjectUrl(blob);
   try {
+    if (job.controller.signal.aborted) throw new DOMException("Download cancelled", "AbortError");
     const id = await chrome.downloads.download({ url: objectUrl, filename, saveAs, conflictAction: "uniquify" });
-    if (active) {
-      active.downloadId = id;
-      active.objectUrl = objectUrl;
-      if (active.controller.signal.aborted) {
-        await chrome.downloads.cancel(id).catch(() => undefined);
-        await chrome.downloads.removeFile(id).catch(() => undefined);
-        releaseObjectUrl(id);
-        throw new DOMException("Download cancelled", "AbortError");
-      }
+    job.downloadId = id;
+    job.objectUrl = objectUrl;
+    if (job.controller.signal.aborted) {
+      await discardDownload(id);
+      releaseObjectUrl(job, id);
+      throw new DOMException("Download cancelled", "AbortError");
     }
     return id;
   } catch (error) {
-    revokeObjectUrl(objectUrl);
+    if (job.objectUrl !== objectUrl) revokeObjectUrl(objectUrl);
     throw error;
   }
 }
@@ -193,25 +207,35 @@ async function ensureOffscreenDocument(): Promise<void> {
   await creatingOffscreen;
 }
 
-async function cancelDownload(): Promise<void> {
-  const current = active;
-  if (!current) return;
-  const downloadId = current.downloadId;
-  current.controller.abort();
+async function cancelDownload(key: string): Promise<DownloadProgress | null> {
+  const job = jobs.get(key);
+  if (!job) return null;
+  if (terminal(job.progress.phase)) return job.progress;
+  const downloadId = job.downloadId;
+  job.controller.abort();
   if (downloadId !== undefined) {
-    await chrome.downloads.cancel(downloadId).catch(() => undefined);
-    await chrome.downloads.removeFile(downloadId).catch(() => undefined);
-    releaseObjectUrl(downloadId);
+    await discardDownload(downloadId);
+    releaseObjectUrl(job, downloadId);
+  } else if (queue.includes(job)) {
+    queue.splice(queue.indexOf(job), 1);
+    job.progress = { ...job.progress, phase: "cancelled", detail: "Download cancelled", updatedAt: Date.now() };
+    job.finish();
   }
-  await current.promise;
+  await job.promise;
+  return job.progress;
 }
 
-function waitForDownload(id: number, signal: AbortSignal): Promise<void> {
+async function discardDownload(id: number): Promise<void> {
+  await chrome.downloads.cancel(id).catch(() => undefined);
+  await chrome.downloads.removeFile(id).catch(() => undefined);
+}
+
+function waitForDownload(job: Job, id: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const finish = (error?: Error) => {
       chrome.downloads.onChanged.removeListener(listener);
       signal.removeEventListener("abort", aborted);
-      releaseObjectUrl(id);
+      releaseObjectUrl(job, id);
       error ? reject(error) : resolve();
     };
     const check = async () => {
@@ -235,11 +259,15 @@ function waitForDownload(id: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-function releaseObjectUrl(downloadId: number): void {
-  if (active?.downloadId !== downloadId || !active.objectUrl) return;
-  revokeObjectUrl(active.objectUrl);
-  delete active.objectUrl;
-  delete active.downloadId;
+function releaseObjectUrl(job: Job, downloadId: number): void {
+  if (job.downloadId !== downloadId || !job.objectUrl) return;
+  revokeObjectUrl(job.objectUrl);
+  delete job.objectUrl;
+  delete job.downloadId;
+}
+
+function terminal(phase: DownloadProgress["phase"]): boolean {
+  return phase === "done" || phase === "cancelled" || phase === "error";
 }
 
 function isAbort(error: unknown): boolean {
