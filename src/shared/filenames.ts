@@ -1,6 +1,6 @@
 // Turning a board and a pin into file names.
 //
-// Chrome writes every file inside Downloads/Pinpull/<board>/, so a board name
+// Chrome writes every file inside Downloads/Pinhaul/<board>/, so a board name
 // that is empty, absurdly long, or made of illegal characters has to become
 // something a filesystem accepts. Pin ids are the file stem, so two pins never
 // collide and a repeated run writes the same names.

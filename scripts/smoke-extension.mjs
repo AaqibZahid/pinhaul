@@ -5,14 +5,14 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 
 const root = process.cwd();
-const extension = path.resolve(process.env.PINPULL_EXTENSION ?? path.join(root, "dist"));
-const port = Number(process.env.PINPULL_PORT ?? 9229);
-const chrome = process.env.PINPULL_CHROME ?? findChrome();
+const extension = path.resolve(process.env.PINHAUL_EXTENSION ?? path.join(root, "dist"));
+const port = Number(process.env.PINHAUL_PORT ?? 9229);
+const chrome = process.env.PINHAUL_CHROME ?? findChrome();
 
 if (!existsSync(extension)) throw new Error(`extension directory not found: ${extension}`);
-if (!chrome) throw new Error("Set PINPULL_CHROME to Chrome's executable path.");
+if (!chrome) throw new Error("Set PINHAUL_CHROME to Chrome's executable path.");
 
-const profile = await mkdtemp(path.join(os.tmpdir(), "pinpull-smoke-"));
+const profile = await mkdtemp(path.join(os.tmpdir(), "pinhaul-smoke-"));
 const child = spawn(chrome, [
   `--user-data-dir=${profile}`,
   `--disable-extensions-except=${extension}`,
@@ -46,7 +46,7 @@ async function waitForServiceWorker(debugPort) {
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  throw new Error("Chrome opened, but Pinpull's service worker was not found");
+  throw new Error("Chrome opened, but Pinhaul's service worker was not found");
 }
 
 function findChrome() {

@@ -1,4 +1,4 @@
-const channel = new BroadcastChannel("pinpull-blobs");
+const channel = new BroadcastChannel("pinhaul-blobs");
 const urls = new Set<string>();
 
 channel.addEventListener("message", (event: MessageEvent) => {

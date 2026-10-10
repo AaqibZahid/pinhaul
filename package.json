@@ -1,5 +1,5 @@
 {
-  "name": "pinpull",
+  "name": "pinhaul",
   "version": "1.0.0",
   "private": true,
   "description": "Chrome extension that bulk-downloads the images and videos from a Pinterest board.",

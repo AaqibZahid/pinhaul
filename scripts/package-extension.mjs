@@ -49,7 +49,7 @@ for (const entry of entries) {
 chunks.push(endRecord(entries.length, offset - centralOffset, centralOffset));
 
 await mkdir(outputDir, { recursive: true });
-const output = path.join(outputDir, `pinpull-v${manifest.version}.zip`);
+const output = path.join(outputDir, `pinhaul-v${manifest.version}.zip`);
 await writeFile(output, Buffer.concat(chunks));
 console.log(`packaged ${path.relative(root, output)}`);
 

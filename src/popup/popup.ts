@@ -301,8 +301,8 @@ clearSelected.addEventListener("click", () => {
   renderQueueActions();
 });
 downloadSelected.addEventListener("click", () => void start(boards.filter((board) => selected.has(boardKey(board)))));
-saveAs.checked = localStorage.getItem("pinpull.saveAs") === "true";
-saveAs.addEventListener("change", () => localStorage.setItem("pinpull.saveAs", String(saveAs.checked)));
+saveAs.checked = localStorage.getItem("pinhaul.saveAs") === "true";
+saveAs.addEventListener("change", () => localStorage.setItem("pinhaul.saveAs", String(saveAs.checked)));
 manualForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const parsed = parseBoardRef(boardInput.value);

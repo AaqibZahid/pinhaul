@@ -7,7 +7,7 @@ import { PinterestClient, PinterestError, type PinterestErrorKind } from "./pint
 const client = new PinterestClient({ intervalMs: 110 });
 const BOARDS_KEY = "accountBoards";
 const OFFSCREEN_PATH = "offscreen/offscreen.html";
-const blobChannel = new BroadcastChannel("pinpull-blobs");
+const blobChannel = new BroadcastChannel("pinhaul-blobs");
 let creatingOffscreen: Promise<void> | null = null;
 
 type Job = {
