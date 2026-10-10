@@ -39,6 +39,33 @@ describe("downloadBoard", () => {
     expect(saved).toBe(false);
   });
 
+  it("does not create a ZIP when stopped during a media request", async () => {
+    const controller = new AbortController();
+    const save = vi.fn(async () => 1);
+    const client: PinterestGateway = {
+      async getData<T>(resource: string, options: Record<string, unknown>): Promise<T> {
+        return (resource === "BoardResource" ? fixture.board : fixture.pins[String(options.id)]) as T;
+      },
+      async getResource(resource: string): Promise<ResourceEnvelope> {
+        return { resource_response: { data: resource === "BoardSectionsResource" ? fixture.sections : resource === "BoardFeedResource" ? fixture.feed : fixture.sectionPins } };
+      },
+    };
+    vi.stubGlobal("fetch", async () => {
+      controller.abort();
+      throw new DOMException("Stopped", "AbortError");
+    });
+    try {
+      await expect(downloadBoard(
+        { username: "alice", slug: "trip-ideas" }, false,
+        { client, save, wait: async () => undefined },
+        () => undefined, controller.signal,
+      )).rejects.toMatchObject({ name: "AbortError" });
+      expect(save).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("builds one section-aware ZIP from a realistic mixed board", async () => {
     let saved: Blob | undefined;
     const fetched: string[] = [];
