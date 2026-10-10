@@ -20,7 +20,7 @@ Pinpull is a private, local-first Chrome extension. It uses the Pinterest sessio
 ## Highlights
 
 - Browse and refresh boards from the signed-in Pinterest account.
-- Select several boards and download them sequentially as separate ZIPs.
+- Select several boards and download up to two at once as separate ZIPs.
 - Download public boards by URL or `username/boardname`.
 - Preserve board sections as folders.
 - Choose the best available image, direct video, or supported HLS stream.
@@ -60,7 +60,7 @@ After pulling or rebuilding, press **Reload** on Pinpull's extension card before
 3. Select one or more account boards, then choose **Download selected**. Use **ZIP** for a single board.
 4. For another public board, paste its Pinterest URL or `username/boardname`.
 5. Enable **Ask where to save the ZIP** when a custom destination is needed.
-6. Choose **Stop** to cancel the active board and the remaining queue. Its progress card disappears. Before save, no file is written; during Chrome's final write, Pinpull asks Chrome to cancel and remove the partial ZIP.
+6. Each board has its own progress card and **Stop** button. Stop cancels only that board and hides its card. Before save, no file is written; during Chrome's final write, Pinpull asks Chrome to cancel and remove the partial ZIP.
 
 Board synchronization runs when the popup opens, when Refresh is pressed, and periodically while the popup remains open. Pinterest does not provide a push channel for immediate board updates.
 
@@ -107,7 +107,7 @@ docs/             README artwork
 
 - Pinterest's private web-resource responses can change without notice.
 - ZIP creation uses ZIP32 in memory. Very large boards can require substantial memory.
-- Downloads are intentionally sequential to limit memory and Pinterest request pressure.
+- At most two boards run at once to limit memory and Pinterest request pressure; further selections wait their turn.
 - Pins Pinterest marks ineligible, or which expose no downloadable media, are skipped.
 - Users are responsible for respecting Pinterest's terms, copyright, and creators' rights.
 

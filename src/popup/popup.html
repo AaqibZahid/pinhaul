@@ -43,6 +43,8 @@
         </div>
       </section>
 
+      <section id="downloads" class="downloads" aria-live="polite"></section>
+
       <section id="boards" class="boards" aria-live="polite">
         <div class="list-heading"><span>Your collection</span><span>Choose one or many</span></div>
         <div id="board-list" class="board-list"></div>
@@ -60,17 +62,20 @@
         </form>
       </section>
 
-      <section id="progress" class="progress hidden" aria-live="polite">
-        <div class="progress-heading">
-          <div class="spinner" aria-hidden="true"></div>
-          <div>
-            <strong id="phase">Starting</strong>
-            <p id="detail">Preparing download</p>
+      <template id="progress-template">
+        <article class="progress">
+          <div class="progress-heading">
+            <div class="spinner" aria-hidden="true"></div>
+            <div>
+              <strong class="phase">Starting</strong>
+              <p class="progress-board"></p>
+              <p class="detail">Preparing download</p>
+            </div>
           </div>
-        </div>
-        <div class="bar"><div id="bar-fill" class="bar-fill"></div></div>
-        <div class="stats"><span id="stats">0 pins · 0 files</span><button id="cancel" class="cancel" type="button">Stop</button></div>
-      </section>
+          <div class="bar"><div class="bar-fill"></div></div>
+          <div class="stats"><span class="progress-stats">0 pins · 0 files</span><button class="cancel" type="button">Stop</button></div>
+        </article>
+      </template>
     </main>
     <script type="module" src="popup.js"></script>
   </body>
