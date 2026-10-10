@@ -26,6 +26,6 @@
     "image-section": { "id": "image-section", "is_eligible_for_image_download": true, "images": { "orig": { "url": "https://i.pinimg.com/originals/section.jpg" } } },
     "direct-video": { "id": "direct-video", "is_eligible_for_image_download": true, "videos": { "video_list": { "mp4": { "url": "https://v1.pinimg.com/direct.mp4", "width": 720, "height": 720 } } } },
     "hls-video": { "id": "hls-video", "is_eligible_for_image_download": true, "videos": { "video_list": { "hls": { "url": "https://v1.pinimg.com/hls/index.m3u8", "width": 720, "height": 720 } } } },
-    "skip-me": { "id": "skip-me", "is_eligible_for_image_download": false, "images": { "orig": { "url": "https://i.pinimg.com/originals/skip.jpg" } } }
+    "skip-me": { "id": "skip-me", "is_eligible_for_image_download": false }
   }
 }

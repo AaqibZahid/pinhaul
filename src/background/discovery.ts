@@ -118,7 +118,7 @@ export class BoardCrawler {
       // One stream failing must not lose the board: it is marked walked and the
       // reason is reported with the rest of the job.
       stream.done = true;
-      return { pinIds: [], duplicates: 0, error: messageOf(error), stream: stream.kind };
+      return { pinIds: [], pins: [], duplicates: 0, error: messageOf(error), stream: stream.kind };
     }
 
     let items = page?.items ?? [];
@@ -129,7 +129,7 @@ export class BoardCrawler {
       const retried = await this.retryPage(resource, options);
       if (retried === null) {
         stream.done = true;
-        return { pinIds: [], duplicates: 0, stream: stream.kind };
+        return { pinIds: [], pins: [], duplicates: 0, stream: stream.kind };
       }
       items = retried.items;
       bookmark = retried.bookmark;
@@ -138,8 +138,10 @@ export class BoardCrawler {
     stream.bookmark = bookmark;
     if (!bookmark) stream.done = true;
 
+    const pins = pinsOf(items);
     return {
-      pinIds: pinIdsOf(items),
+      pinIds: pins.map((pin) => pin.id),
+      pins,
       duplicates: 0,
       stream: stream.kind,
       sectionName: stream.name,
@@ -172,6 +174,7 @@ interface Page {
 
 export interface PageResult {
   pinIds: string[];
+  pins: Array<{ id: string; data: unknown }>;
   duplicates: number;
   stream: "feed" | "section";
   sectionName?: string;
@@ -181,13 +184,19 @@ export interface PageResult {
 
 /** The pin ids a page holds, ignoring the module the feed ends with. */
 export function pinIdsOf(items: unknown[]): string[] {
-  const ids: string[] = [];
+  return pinsOf(items).map((pin) => pin.id);
+}
+
+function pinsOf(items: unknown[]): Array<{ id: string; data: unknown }> {
+  const pins: Array<{ id: string; data: unknown }> = [];
   for (const item of items) {
     if (!isPinItem(item)) continue;
     const id = pinIdOf(item);
-    if (id) ids.push(id);
+    if (id) {
+      pins.push({ id, data: item });
+    }
   }
-  return ids;
+  return pins;
 }
 
 function itemsOf(envelope: unknown): unknown[] {

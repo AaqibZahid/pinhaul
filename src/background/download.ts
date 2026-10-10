@@ -33,6 +33,7 @@ export async function downloadBoard(
   const sections = resolved.info.sectionCount === 0 ? [] : await loadSections(deps.client, resolved.info.id);
   const crawler = new BoardCrawler(deps.client, resolved.info.id, BoardCrawler.start(resolved.info.id, sections));
   const sectionForPin = new Map<string, string>();
+  const feedForPin = new Map<string, unknown>();
   const pinIds: string[] = [];
   const seen = new Set<string>();
 
@@ -43,6 +44,9 @@ export async function downloadBoard(
     throwIfAborted(signal);
     const page = await crawler.nextPage();
     if (!page) break;
+    for (const pin of page.pins) {
+      if (!feedForPin.has(pin.id)) feedForPin.set(pin.id, pin.data);
+    }
     for (const id of page.pinIds) {
       if (page.sectionName && !sectionForPin.has(id)) sectionForPin.set(id, page.sectionName);
       if (seen.has(id)) continue;
@@ -60,7 +64,7 @@ export async function downloadBoard(
   report(progress, onProgress);
   for (const pinId of pinIds) {
     throwIfAborted(signal);
-    await addPin(zip, pinId, sectionForPin.get(pinId), progress, deps, signal);
+    await addPin(zip, pinId, feedForPin.get(pinId), sectionForPin.get(pinId), progress, deps, signal);
     progress.processed += 1;
     progress.detail = `${progress.processed} of ${pinIds.length} pins`;
     report(progress, onProgress);
@@ -92,6 +96,7 @@ export async function downloadBoard(
 async function addPin(
   zip: ZipWriter,
   pinId: string,
+  feedPin: unknown,
   section: string | undefined,
   progress: DownloadProgress,
   deps: DownloadDeps,
@@ -100,6 +105,7 @@ async function addPin(
   try {
     const detail = await deps.client.getData("PinResource", { id: pinId, field_set_key: "detailed" }, `/pin/${pinId}/`);
     const items = mediaItemsOf(detail);
+    if (items.length === 0) items.push(...mediaItemsOf(feedPin));
     if (items.length === 0) {
       progress.skipped += 1;
       return;
