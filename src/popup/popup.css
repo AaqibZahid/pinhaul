@@ -116,6 +116,7 @@ input[type="text"]:focus { border-color: rgba(239,104,86,.55); background: rgba(
 .bar-fill { width: 3%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #c84234, var(--accent-bright)); box-shadow: 0 0 14px rgba(239,104,86,.35); transition: width .3s cubic-bezier(.2,.8,.2,1); }
 .stats { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .cancel { padding: 5px 9px; border-radius: 8px; background: transparent; color: var(--accent-bright); font-size: 11px; font-weight: 700; }
+.progress.finished .cancel, .progress.failed .cancel { display: none; }
 .hidden { display: none !important; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes appear { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }

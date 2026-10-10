@@ -85,6 +85,7 @@ function createBoardCard(board: BoardSummary): HTMLElement {
   const card = document.createElement("article");
   card.className = "board-card";
   const key = boardKey(board);
+  card.dataset.key = key;
   card.classList.toggle("selected", selected.has(key));
   const pick = document.createElement("input");
   pick.className = "board-picker";
@@ -152,6 +153,11 @@ async function start(items: Array<BoardSummary | BoardRef>): Promise<void> {
   if (fresh.length === 0) return;
   for (const item of fresh) {
     const key = boardKey(item);
+    if (progressByKey.has(key)) {
+      cards.get(key)?.remove();
+      cards.delete(key);
+      progressByKey.delete(key);
+    }
     pendingKeys.add(key);
     const card = cardFor(key);
     card.classList.remove("hidden", "finished", "failed");
@@ -172,7 +178,7 @@ async function start(items: Array<BoardSummary | BoardRef>): Promise<void> {
   }, () => setMessage("The download could not start.", true)).finally(() => {
     startsInFlight -= 1;
     for (const ref of refs) pendingKeys.delete(boardKey(ref));
-    renderBoards(boards);
+    updateBoardAvailability();
     renderQueueActions();
   });
   void poll();
@@ -206,8 +212,16 @@ function showAll(progresses: DownloadProgress[]): void {
     } else if (!stopping.has(key)) show(progress, cardFor(key));
   }
   if (before !== boards.map((board) => isRunning(boardKey(board))).join()) {
-    renderBoards(boards);
+    updateBoardAvailability();
     renderQueueActions();
+  }
+}
+
+function updateBoardAvailability(): void {
+  for (const card of Array.from(boardList.querySelectorAll<HTMLElement>(".board-card"))) {
+    const running = isRunning(card.dataset.key ?? "");
+    card.querySelector<HTMLInputElement>(".board-picker")!.disabled = running;
+    card.querySelector<HTMLButtonElement>(".download-button")!.disabled = running;
   }
 }
 
