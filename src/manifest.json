@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Pinpull",
   "version": "1.0.0",
-  "description": "Bulk-download the images and videos from a Pinterest board into an organized folder.",
+  "description": "Bulk-download Pinterest boards as organized ZIP archives.",
   "minimum_chrome_version": "116",
   "permissions": ["downloads", "offscreen", "storage"],
   "host_permissions": [
