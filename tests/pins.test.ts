@@ -182,6 +182,20 @@ describe("mediaItemsOf", () => {
     expect(urls(items)).toEqual(["https://i.pinimg.com/736x/a/b.jpg"]);
   });
 
+  it("reads live story page images and falls back to the pin image when a page has none", () => {
+    expect(urls(mediaItemsOf({
+      story_pin_data: { pages: [{ image: { images: { orig: { url: "https://x/page.jpg" } } } }] },
+      images: { orig: { url: "https://x/cover.jpg" } },
+    }))).toEqual(["https://x/page.jpg"]);
+    expect(urls(mediaItemsOf({
+      story_pin_data: { pages: [{ image_adjusted: { images: { orig: { url: "https://x/adjusted.jpg" } } } }] },
+    }))).toEqual(["https://x/adjusted.jpg"]);
+    expect(urls(mediaItemsOf({
+      story_pin_data: { pages: [{ blocks: [{}] }] },
+      images: { orig: { url: "https://x/cover.jpg" } },
+    }))).toEqual(["https://x/cover.jpg"]);
+  });
+
   it("keeps the largest of a page split over several blocks", () => {
     const items = mediaItemsOf({
       story_pin_data: {

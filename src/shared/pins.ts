@@ -172,7 +172,7 @@ function selectImages(record: Record<string, unknown>): MediaItem[] {
       const best = bestImage(page, String(index + 1));
       if (best) items.push(toItem(best));
     });
-    return items;
+    if (items.length > 0) return items;
   }
 
   const best = bestImage(record, "image");
@@ -215,6 +215,12 @@ function bestImage(container: Record<string, unknown>, label: string): Candidate
  * one image puts it on the block itself, named for its own size. */
 function imageVariants(container: Record<string, unknown>): Record<string, unknown>[] {
   const variants: Record<string, unknown>[] = [];
+  for (const key of ["image", "image_adjusted", "imageAdjusted"]) {
+    const image = container[key];
+    if (!image || typeof image !== "object") continue;
+    const nested = (image as Record<string, unknown>).images;
+    if (nested && typeof nested === "object") variants.push(nested as Record<string, unknown>);
+  }
   for (const key of ["images_originals", "imageAdjustedSpec_orig", "images_orig", "images"]) {
     const value = container[key];
     if (value && typeof value === "object") variants.push(value as Record<string, unknown>);
