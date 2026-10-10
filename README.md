@@ -64,7 +64,7 @@ After pulling or rebuilding, press **Reload** on Pinpull's extension card before
 
 Board synchronization runs when the popup opens, when Refresh is pressed, and periodically while the popup remains open. Pinterest does not provide a push channel for immediate board updates.
 
-If the board list is empty, confirm that Pinterest is signed in **in the same Chrome profile**, then press Refresh. If Pinterest changes its private web API, the extension may need an update; see [Known limits](#known-limits).
+If the board list is empty, confirm that Pinterest is signed in **in the same Chrome profile**, then press Refresh.
 
 ## Privacy and permissions
 
@@ -102,14 +102,6 @@ tests/            unit and integration fixtures
 scripts/          packaging and Chrome smoke-test helpers
 docs/             README artwork
 ```
-
-## Known limits
-
-- Pinterest's private web-resource responses can change without notice.
-- ZIP creation uses ZIP32 in memory. Very large boards can require substantial memory.
-- At most two boards run at once to limit memory and Pinterest request pressure; further selections wait their turn.
-- Pins Pinterest marks ineligible, or which expose no downloadable media, are skipped.
-- Users are responsible for respecting Pinterest's terms, copyright, and creators' rights.
 
 ## License
 
