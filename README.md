@@ -38,7 +38,9 @@ Board name/
 
 ## Install locally
 
-Requirements: Chrome 116+ and Node.js 20+.
+Requirements: Chrome 116+. Download the ZIP from the [latest GitHub Release](https://github.com/AaqibZahid/pinpull/releases/latest), extract it, and load the extracted folder containing `manifest.json` in Chrome. The ZIP itself cannot be loaded as an unpacked extension.
+
+To build from source, you also need Node.js 20+:
 
 ```sh
 git clone https://github.com/AaqibZahid/pinpull.git
@@ -47,9 +49,7 @@ npm ci
 npm run build
 ```
 
-Then open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the generated `dist` folder. Chrome's [unpacked-extension guide](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked) shows the same steps.
-
-If you have a packaged Pinpull ZIP instead of the source, **extract it first** and select the extracted folder containing `manifest.json`. Do not select the ZIP itself; this is a local unpacked extension, not a Chrome Web Store installation.
+For either option, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the extracted release folder or generated `dist` folder. Chrome's [unpacked-extension guide](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked) shows the same steps.
 
 After pulling or rebuilding, press **Reload** on Pinpull's extension card before testing changes.
 
