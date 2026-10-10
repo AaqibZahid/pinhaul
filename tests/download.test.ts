@@ -114,6 +114,8 @@ describe("downloadBoard", () => {
       expect(result.discovered).toBe(5);
       expect(result.processed).toBe(5);
       expect(result.files).toBe(5);
+      expect(result.images).toBe(3);
+      expect(result.videos).toBe(2);
       expect(result.skipped).toBe(0);
       expect(result.failed).toBe(0);
       expect(fetched).toContain("https://i.pinimg.com/736x/skip.jpg");

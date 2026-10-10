@@ -84,11 +84,7 @@ export async function downloadBoard(
   await deps.wait(downloadId, signal);
 
   progress.phase = "done";
-  progress.detail = [
-    `${progress.files} files saved`,
-    progress.skipped ? `${progress.skipped} without media` : "",
-    progress.failed ? `${progress.failed} failed` : "",
-  ].filter(Boolean).join(" · ");
+  progress.detail = `${progress.files} files saved`;
   report(progress, onProgress);
   return progress;
 }
@@ -122,6 +118,8 @@ async function addPin(
       const extension = item.kind === "hls" ? ".mp4" : extensionOf(item.url, item.kind === "image" ? ".jpg" : ".mp4");
       zip.add(`${folder}/${stem}${extension}`, file.bytes);
       progress.files += 1;
+      if (item.kind === "image") progress.images += 1;
+      else progress.videos += 1;
     }
   } catch (error) {
     if (isAbort(error)) throw error;
@@ -176,6 +174,8 @@ function initialProgress(ref: BoardRef): DownloadProgress {
     discovered: 0,
     processed: 0,
     files: 0,
+    images: 0,
+    videos: 0,
     skipped: 0,
     failed: 0,
     detail: "Starting",

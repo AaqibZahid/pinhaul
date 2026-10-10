@@ -65,6 +65,8 @@ export interface DownloadProgress {
   discovered: number;
   processed: number;
   files: number;
+  images: number;
+  videos: number;
   skipped: number;
   failed: number;
   detail: string;

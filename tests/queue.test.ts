@@ -35,6 +35,8 @@ function complete(ref: BoardRef): DownloadProgress {
     discovered: 1,
     processed: 1,
     files: 1,
+    images: 1,
+    videos: 0,
     skipped: 0,
     failed: 0,
     detail: "1 file saved",

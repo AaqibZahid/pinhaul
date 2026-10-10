@@ -83,6 +83,8 @@ function startDownloads(refs: BoardRef[], saveAs: boolean): {
     discovered: 0,
     processed: 0,
     files: 0,
+    images: 0,
+    videos: 0,
     skipped: 0,
     failed: 0,
     detail: "Starting",
