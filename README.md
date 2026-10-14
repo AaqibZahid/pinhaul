@@ -103,6 +103,14 @@ scripts/          packaging and Chrome smoke-test helpers
 docs/             README artwork
 ```
 
+## Contributing
+
+Contributions are welcome—whether you're reporting a bug, improving documentation, testing downloads, or submitting a focused fix. Please [open an issue](https://github.com/AaqibZahid/pinhaul/issues) to discuss substantial changes before starting. Contributions are licensed under the project's [MIT license](LICENSE).
+
+## Contact
+
+Built and maintained by Aaqib Zahid. For collaboration, project questions, or professional opportunities, reach me at [aaqibzahid.04@gmail.com](mailto:aaqibzahid.04@gmail.com). For bugs and feature requests, please use [GitHub Issues](https://github.com/AaqibZahid/pinhaul/issues).
+
 ## License
 
 [MIT](LICENSE) © 2026 Pinhaul contributors.
